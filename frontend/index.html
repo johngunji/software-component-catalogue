@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>ComponentHub — Software Component Catalogue</title>
+
+    <link rel="stylesheet" href="css/style.css">
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+
+<body>
+
+    <!-- ================= NAVBAR ================= -->
+
+    <header class="navbar">
+
+        <div class="brand">
+            <div class="logo">
+                <i data-lucide="box"></i>
+            </div>
+
+            <div>
+                <h2>Component<span>Hub</span></h2>
+                <p>Software Component Catalogue</p>
+            </div>
+        </div>
+
+        <nav class="nav-links">
+
+            <a href="#" class="nav-item active">
+                <i data-lucide="house"></i>
+                Home
+            </a>
+
+            <a href="#categories" class="nav-item">
+                <i data-lucide="layout-grid"></i>
+                Browse
+            </a>
+
+            <a href="#search" class="nav-item">
+                <i data-lucide="search"></i>
+                Search
+            </a>
+
+            <a href="#" class="nav-item" id="addComponentBtn">
+                <i data-lucide="plus-square"></i>
+                Add Component
+            </a>
+
+            <a href="#" class="nav-item">
+                <i data-lucide="chart-no-axes-column"></i>
+                Statistics
+            </a>
+
+        </nav>
+
+        <div class="profile">
+
+            <i data-lucide="bell" class="notification"></i>
+
+            <div class="avatar">S</div>
+
+            <span>Student</span>
+
+            <i data-lucide="chevron-down"></i>
+
+        </div>
+
+    </header>
+
+
+    <!-- ================= HERO ================= -->
+
+    <main>
+
+        <section class="hero">
+
+            <div class="hero-content">
+
+                <div class="eyebrow">
+                    DISCOVER
+                    <span>•</span>
+                    REUSE
+                    <span>•</span>
+                    BUILD FASTER
+                </div>
+
+                <h1>
+                    A Comprehensive
+                    <br>
+                    <span>Software Component</span>
+                    Catalogue
+                </h1>
+
+                <p class="hero-description">
+                    Find, reuse and manage software design and code components.
+                    Search by keywords, explore categories, track usage and
+                    contribute to a growing library of reusable components.
+                </p>
+
+
+                <!-- SEARCH -->
+
+                <div class="search-box" id="search">
+
+                    <i data-lucide="search"></i>
+
+                    <input
+                        type="text"
+                        id="searchInput"
+                        placeholder="Search components by keyword, name or description..."
+                    >
+
+                    <button id="searchBtn">
+                        Search
+                    </button>
+
+                </div>
+
+
+                <!-- POPULAR SEARCHES -->
+
+                <div class="popular">
+
+                    <strong>Popular searches:</strong>
+
+                    <button class="search-chip">
+                        authentication
+                    </button>
+
+                    <button class="search-chip">
+                        database
+                    </button>
+
+                    <button class="search-chip">
+                        UI component
+                    </button>
+
+                    <button class="search-chip">
+                        API
+                    </button>
+
+                    <button class="search-chip">
+                        file handling
+                    </button>
+
+                </div>
+
+            </div>
+
+
+            <!-- HERO VISUAL -->
+
+            <div class="hero-visual">
+
+                <div class="floating-card card-top">
+                    <div class="floating-icon blue">
+                        <i data-lucide="settings"></i>
+                    </div>
+
+                    <div>
+                        <strong>Reusable</strong>
+                        <span>Components</span>
+                    </div>
+                </div>
+
+
+                <div class="code-window">
+
+                    <div class="window-header">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+
+                    <div class="code-content">
+
+                        <div class="code-line">
+                            <b></b>
+                            <em></em>
+                        </div>
+
+                        <div class="code-line">
+                            <b></b>
+                            <em></em>
+                        </div>
+
+                        <div class="code-line">
+                            <b></b>
+                            <em></em>
+                        </div>
+
+                        <div class="code-line">
+                            <b></b>
+                            <em></em>
+                        </div>
+
+                        <div class="code-line">
+                            <b></b>
+                            <em></em>
+                        </div>
+
+                    </div>
+
+                    <div class="code-symbol">
+                        &lt;/&gt;
+                    </div>
+
+                </div>
+
+
+                <div class="floating-card card-search">
+
+                    <div class="floating-icon purple">
+                        <i data-lucide="search"></i>
+                    </div>
+
+                    <div>
+                        <strong>Keyword</strong>
+                        <span>Search</span>
+                    </div>
+
+                </div>
+
+
+                <div class="floating-card card-category">
+
+                    <div class="floating-icon yellow">
+                        <i data-lucide="folder"></i>
+                    </div>
+
+                    <div>
+                        <strong>Hierarchical</strong>
+                        <span>Categories</span>
+                    </div>
+
+                </div>
+
+
+                <div class="floating-card card-usage">
+
+                    <div class="floating-icon purple">
+                        <i data-lucide="chart-column"></i>
+                    </div>
+
+                    <div>
+                        <strong>Usage</strong>
+                        <span>Tracking</span>
+                    </div>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- ================= FEATURES ================= -->
+
+        <section class="features">
+
+            <div class="feature-card">
+
+                <div class="feature-icon blue">
+                    <i data-lucide="layers-3"></i>
+                </div>
+
+                <div>
+                    <h3>Browse Components</h3>
+                    <p>
+                        Explore components organised in a hierarchical
+                        category structure.
+                    </p>
+                </div>
+
+                <i data-lucide="arrow-right" class="arrow"></i>
+
+            </div>
+
+
+            <div class="feature-card">
+
+                <div class="feature-icon green">
+                    <i data-lucide="search"></i>
+                </div>
+
+                <div>
+                    <h3>Search Easily</h3>
+                    <p>
+                        Find the right component using keywords and filters.
+                    </p>
+                </div>
+
+                <i data-lucide="arrow-right" class="arrow"></i>
+
+            </div>
+
+
+            <div class="feature-card">
+
+                <div class="feature-icon yellow">
+                    <i data-lucide="chart-column"></i>
+                </div>
+
+                <div>
+                    <h3>Track Usage</h3>
+                    <p>
+                        View how many times a component has been used and queried.
+                    </p>
+                </div>
+
+                <i data-lucide="arrow-right" class="arrow"></i>
+
+            </div>
+
+
+            <div class="feature-card">
+
+                <div class="feature-icon red">
+                    <i data-lucide="plus"></i>
+                </div>
+
+                <div>
+                    <h3>Contribute</h3>
+                    <p>
+                        Add new components to help grow the catalogue.
+                    </p>
+                </div>
+
+                <i data-lucide="arrow-right" class="arrow"></i>
+
+            </div>
+
+        </section>
+
+
+        <!-- ================= CATEGORIES ================= -->
+
+        <section class="categories-section" id="categories">
+
+            <div class="section-header">
+
+                <div>
+                    <h2>Browse by Category</h2>
+
+                    <p>
+                        Explore components by category to find what you need.
+                    </p>
+                </div>
+
+                <button id="viewCategories">
+                    View All Categories
+                    <i data-lucide="arrow-right"></i>
+                </button>
+
+            </div>
+
+
+            <div class="categories-grid">
+
+                <!-- CATEGORY 1 -->
+
+                <div
+                    class="category-card"
+                    data-category="UI / Frontend"
+                >
+
+                    <div class="category-icon">
+                        <i data-lucide="monitor"></i>
+                    </div>
+
+                    <h3>User Interface</h3>
+
+                    <span class="component-count">
+                        24 components
+                    </span>
+
+                    <p>
+                        UI elements, layouts, forms and frontend components.
+                    </p>
+
+                </div>
+
+
+                <!-- CATEGORY 2 -->
+
+                <div
+                    class="category-card"
+                    data-category="Authentication"
+                >
+
+                    <div class="category-icon">
+                        <i data-lucide="lock-keyhole"></i>
+                    </div>
+
+                    <h3>Authentication</h3>
+
+                    <span class="component-count">
+                        18 components
+                    </span>
+
+                    <p>
+                        Login, registration, access control and security modules.
+                    </p>
+
+                </div>
+
+
+                <!-- CATEGORY 3 -->
+
+                <div
+                    class="category-card"
+                    data-category="Database"
+                >
+
+                    <div class="category-icon">
+                        <i data-lucide="database"></i>
+                    </div>
+
+                    <h3>Database</h3>
+
+                    <span class="component-count">
+                        32 components
+                    </span>
+
+                    <p>
+                        Database connectors, ORM modules and query utilities.
+                    </p>
+
+                </div>
+
+
+                <!-- CATEGORY 4 -->
+
+                <div
+                    class="category-card"
+                    data-category="File Handling"
+                >
+
+                    <div class="category-icon">
+                        <i data-lucide="file"></i>
+                    </div>
+
+                    <h3>File Handling</h3>
+
+                    <span class="component-count">
+                        15 components
+                    </span>
+
+                    <p>
+                        File upload, download, parsing and storage utilities.
+                    </p>
+
+                </div>
+
+
+                <!-- CATEGORY 5 -->
+
+                <div
+                    class="category-card"
+                    data-category="API & Integration"
+                >
+
+                    <div class="category-icon">
+                        <i data-lucide="share-2"></i>
+                    </div>
+
+                    <h3>API & Integration</h3>
+
+                    <span class="component-count">
+                        27 components
+                    </span>
+
+                    <p>
+                        API clients, third-party integrations and services.
+                    </p>
+
+                </div>
+
+
+                <!-- CATEGORY 6 -->
+
+                <div
+                    class="category-card"
+                    data-category="Utilities"
+                >
+
+                    <div class="category-icon utility">
+                        <i data-lucide="wrench"></i>
+                    </div>
+
+                    <h3>Utilities</h3>
+
+                    <span class="component-count">
+                        21 components
+                    </span>
+
+                    <p>
+                        Common helper functions and utility modules.
+                    </p>
+
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+
+    <!-- ================= MODAL ================= -->
+
+    <div class="modal-overlay" id="modal">
+
+        <div class="modal">
+
+            <button class="close-modal" id="closeModal">
+                <i data-lucide="x"></i>
+            </button>
+
+            <div class="modal-icon">
+                <i data-lucide="plus"></i>
+            </div>
+
+            <h2>Add Component</h2>
+
+            <p>
+                Add a reusable software component to the catalogue.
+            </p>
+
+            <input
+                type="text"
+                placeholder="Component name"
+            >
+
+            <input
+                type="text"
+                placeholder="Category"
+            >
+
+            <button class="modal-submit">
+                Add Component
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <script src="js/script.js"></script>
+
+</body>
+</html>
