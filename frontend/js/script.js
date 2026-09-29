@@ -28,18 +28,8 @@ function performSearch() {
         return;
     }
 
-    /*
-        Later this will become:
-
-        GET /api/components/search?q=query
-
-        For now we simply demonstrate
-        the frontend behaviour.
-    */
-
-    alert(
-        `Searching for components matching: "${query}"`
-    );
+    window.location.href =
+        `pages/search.html?q=${encodeURIComponent(query)}`;
 }
 
 
@@ -94,29 +84,21 @@ chips.forEach(function(chip) {
    CATEGORY CARDS
 ========================= */
 
-const categories =
+const categoryCards =
     document.querySelectorAll(".category-card");
 
 
-categories.forEach(function(card) {
+categoryCards.forEach(card => {
 
     card.addEventListener(
         "click",
-        function() {
+        () => {
 
             const category =
                 card.dataset.category;
 
-            /*
-                Later:
-
-                window.location.href =
-                `/browse?category=${category}`
-            */
-
-            alert(
-                `Opening category: ${category}`
-            );
+            window.location.href =
+                `pages/browse.html?category=${encodeURIComponent(category)}`;
 
         }
     );
@@ -142,9 +124,8 @@ addComponentBtn.addEventListener(
     "click",
     function(event) {
 
-        event.preventDefault();
-
-        modal.classList.add("show");
+        window.location.href =
+            "pages/add-component.html";
 
     }
 );
@@ -186,11 +167,8 @@ viewCategories.addEventListener(
     "click",
     function() {
 
-        document
-            .getElementById("categories")
-            .scrollIntoView({
-                behavior: "smooth"
-            });
+        window.location.href =
+            "pages/browse.html";
 
     }
 );

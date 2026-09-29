@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Statistics | ComponentHub</title>
+
+    <link rel="stylesheet" href="../css/style.css">
+
+    <style>
+
+        .stats-page {
+            background: #f8f9fd;
+            min-height: calc(100vh - 76px);
+            padding: 45px 7%;
+        }
+
+        .stats-container {
+            max-width: 1150px;
+            margin: auto;
+        }
+
+        .stats-header {
+            margin-bottom: 30px;
+        }
+
+        .stats-header h1 {
+            font-size: 32px;
+            margin-bottom: 8px;
+        }
+
+        .stats-header p {
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        /* SUMMARY CARDS */
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 18px;
+            margin-bottom: 30px;
+        }
+
+        .summary-card {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 22px;
+        }
+
+        .summary-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .summary-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            background: #eef0ff;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .summary-label {
+            color: var(--muted);
+            font-size: 12px;
+            margin-top: 15px;
+        }
+
+        .summary-value {
+            font-size: 28px;
+            font-weight: 700;
+            margin-top: 4px;
+        }
+
+        /* MAIN GRID */
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .stats-card {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 24px;
+        }
+
+        .stats-card.full {
+            grid-column: 1 / -1;
+        }
+
+        .stats-card h2 {
+            font-size: 17px;
+            margin-bottom: 5px;
+        }
+
+        .stats-card-description {
+            color: var(--muted);
+            font-size: 11px;
+            margin-bottom: 22px;
+        }
+
+        /* CATEGORY BARS */
+
+        .category-row {
+            margin-bottom: 18px;
+        }
+
+        .category-info {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 7px;
+            font-size: 12px;
+        }
+
+        .category-count {
+            color: var(--muted);
+        }
+
+        .progress {
+            height: 8px;
+            background: #edf0f6;
+            border-radius: 20px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: var(--primary);
+            border-radius: 20px;
+        }
+
+        /* MOST USED */
+
+        .usage-list {
+            display: flex;
+            flex-direction: column;
+            gap: 13px;
+        }
+
+        .usage-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding-bottom: 13px;
+            border-bottom: 1px solid #edf0f5;
+        }
+
+        .usage-item:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+
+        .usage-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 9px;
+            background: #eef0ff;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 12px;
+        }
+
+        .usage-info {
+            flex: 1;
+        }
+
+        .usage-name {
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .usage-category {
+            color: var(--muted);
+            font-size: 10px;
+            margin-top: 3px;
+        }
+
+        .usage-number {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--primary);
+        }
+
+        /* TABLE */
+
+        .table-wrapper {
+            overflow-x: auto;
+        }
+
+        .stats-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .stats-table th {
+            text-align: left;
+            color: var(--muted);
+            font-weight: 600;
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .stats-table td {
+            padding: 13px 12px;
+            border-bottom: 1px solid #edf0f5;
+        }
+
+        .stats-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .table-tag {
+            background: #eef1fb;
+            color: #53617d;
+            padding: 5px 8px;
+            border-radius: 6px;
+            font-size: 10px;
+        }
+
+        @media (max-width: 900px) {
+
+            .summary-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .stats-card.full {
+                grid-column: auto;
+            }
+
+        }
+
+        @media (max-width: 600px) {
+
+            .stats-page {
+                padding: 30px 5%;
+            }
+
+            .summary-grid {
+                grid-template-columns: 1fr;
+            }
+
+        }
+
+    </style>
+
+</head>
+
+
+<body>
+
+    <!-- NAVBAR -->
+
+    <header class="navbar">
+
+        <div class="brand">
+
+            <div class="logo">
+                <i data-lucide="box"></i>
+            </div>
+
+            <div>
+
+                <h2>
+                    Component<span>Hub</span>
+                </h2>
+
+                <p>
+                    Software Component Catalogue
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <nav class="nav-links">
+
+            <a href="../index.html" class="nav-item">
+                <i data-lucide="house"></i>
+                Home
+            </a>
+
+            <a href="browse.html" class="nav-item">
+                <i data-lucide="layout-grid"></i>
+                Browse
+            </a>
+
+            <a href="search.html" class="nav-item">
+                <i data-lucide="search"></i>
+                Search
+            </a>
+
+            <a href="add-component.html" class="nav-item">
+                <i data-lucide="plus-square"></i>
+                Add Component
+            </a>
+
+            <a href="statistics.html" class="nav-item active">
+                <i data-lucide="chart-no-axes-column"></i>
+                Statistics
+            </a>
+
+        </nav>
+
+
+        <div class="profile">
+
+            <div class="avatar">
+                S
+            </div>
+
+            <span>
+                Student
+            </span>
+
+        </div>
+
+    </header>
+
+
+    <!-- STATISTICS -->
+
+    <main class="stats-page">
+
+        <div class="stats-container">
+
+            <div class="stats-header">
+
+                <h1>
+                    Catalogue Statistics
+                </h1>
+
+                <p>
+                    Overview of components, categories and usage
+                    across the software component catalogue.
+                </p>
+
+            </div>
+
+
+            <!-- SUMMARY -->
+
+            <section
+                class="summary-grid"
+                id="summaryGrid"
+            ></section>
+
+
+            <!-- STATISTICS -->
+
+            <section class="stats-grid">
+
+
+                <!-- CATEGORY DISTRIBUTION -->
+
+                <div class="stats-card">
+
+                    <h2>
+                        Components by Category
+                    </h2>
+
+                    <p class="stats-card-description">
+                        Distribution of components across categories.
+                    </p>
+
+                    <div
+                        id="categoryStats"
+                    ></div>
+
+                </div>
+
+
+                <!-- MOST USED -->
+
+                <div class="stats-card">
+
+                    <h2>
+                        Most Used Components
+                    </h2>
+
+                    <p class="stats-card-description">
+                        Components with the highest usage count.
+                    </p>
+
+                    <div
+                        class="usage-list"
+                        id="usageList"
+                    ></div>
+
+                </div>
+
+
+                <!-- COMPONENT TABLE -->
+
+                <div class="stats-card full">
+
+                    <h2>
+                        Component Overview
+                    </h2>
+
+                    <p class="stats-card-description">
+                        Summary of components available in the catalogue.
+                    </p>
+
+
+                    <div class="table-wrapper">
+
+                        <table class="stats-table">
+
+                            <thead>
+
+                                <tr>
+
+                                    <th>
+                                        Component
+                                    </th>
+
+                                    <th>
+                                        Category
+                                    </th>
+
+                                    <th>
+                                        Type
+                                    </th>
+
+                                    <th>
+                                        Language
+                                    </th>
+
+                                    <th>
+                                        Usage
+                                    </th>
+
+                                </tr>
+
+                            </thead>
+
+
+                            <tbody
+                                id="componentTable"
+                            ></tbody>
+
+                        </table>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+        </div>
+
+    </main>
+
+
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <script src="../js/statistics.js"></script>
+
+</body>
+
+</html>
