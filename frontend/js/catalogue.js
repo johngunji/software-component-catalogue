@@ -2,7 +2,7 @@
 
 const API_BASE =
   localStorage.getItem("componentHub.apiBase") ||
-  "http://localhost:3000/api";
+  "https://componenthub-backend.onrender.com/api";
 
 const ROLES = [
   "Student",
