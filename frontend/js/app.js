@@ -24,6 +24,7 @@ const NAV = [
 const sum = (a, f) => a.reduce((t, x) => t + f(x), 0);
 
 let role = C.role();
+const U = C.user() || { username: "?", role: "Student" };
 
 
 /* ---------- shared shell ---------- */
@@ -57,14 +58,11 @@ document.body.innerHTML = `
         .join("")}
     </nav>
 
-    <label class="role">
-      Role
-      <select id="role">
-        ${ROLES.map(
-          r => `<option${r === role ? " selected" : ""}>${r}</option>`
-        ).join("")}
-      </select>
-    </label>
+    <div class="userbox">
+      <span class="uavatar">${E(U.username[0].toUpperCase())}</span>
+      <span class="uname"><b>${E(U.username)}</b><small>${E(U.role)}</small></span>
+      <button class="btn ghost sm" id="logout">${ic("log-out")} Log out</button>
+    </div>
 
   </div>
 </header>
@@ -104,15 +102,11 @@ document.body.innerHTML = `
 const main = $("#main");
 
 
-/* ---------- role selector ---------- */
+/* ---------- session actions ---------- */
 
-$("#role").onchange = async e => {
-  try {
-    await C.setRole(e.target.value);
-    location.reload();
-  } catch (err) {
-    showError(err);
-  }
+$("#logout").onclick = () => {
+  C.logout();
+  location.href = root + "login.html";
 };
 
 
@@ -1909,18 +1903,15 @@ function showError(err) {
 
 async function boot() {
 
+  if (!C.isLoggedIn()) {
+    const here = (pg === "index" ? "index.html" : `pages/${pg}.html`) + location.search;
+    location.replace(`${root}login.html?next=${encodeURIComponent(here)}`);
+    return;
+  }
+
   try {
 
     await C.init();
-
-    role = C.role();
-
-    const roleSelect =
-      document.querySelector("#role");
-
-    if (roleSelect) {
-      roleSelect.value = role;
-    }
 
     P[pg]();
 

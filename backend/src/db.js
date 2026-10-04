@@ -170,20 +170,16 @@ if (
 
     db.transaction(() => {
 
-        const password =
-            process.env.SEED_PASSWORD ||
-            "changeme123";
+        const fallback = process.env.SEED_PASSWORD;
+        if (!fallback && process.env.NODE_ENV !== "development") {
+            throw new Error("Set SEED_PASSWORD (or NODE_ENV=development locally)");
+        }
 
-
-        /* ---------- users ---------- */
-
-        for (
-            const role of [
-                "student",
-                "cataloguer",
-                "manager"
-            ]
-        ) {
+        for (const role of ["student", "cataloguer", "manager"]) {
+            const password =
+                process.env[`SEED_${role.toUpperCase()}_PASSWORD`] ||
+                fallback ||
+                "changeme123";
 
             db.prepare(`
                 INSERT INTO users(
@@ -192,11 +188,7 @@ if (
                     role
                 )
                 VALUES(?,?,?)
-            `).run(
-                role,
-                hashPassword(password),
-                role
-            );
+            `).run(role, hashPassword(password), role);
 
         }
 

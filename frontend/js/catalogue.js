@@ -1,754 +1,226 @@
-/* ComponentHub frontend data layer connected to the REST API. */
+/* ComponentHub data layer: REST API client and login session. */
 
 const API_BASE =
   localStorage.getItem("componentHub.apiBase") ||
   "https://componenthub-backend.onrender.com/api";
+const ROLES = ["Student", "Cataloguer", "Manager"];
+const SESSION_KEY = "componentHub.session";
 
-const ROLES = [
-  "Student",
-  "Cataloguer",
-  "Manager"
-];
-
-const TOKEN_KEY = "componentHub.jwt";
-const ROLE_KEY = "componentHub.role";
-
-const DEMO_PASSWORD = "changeme123";
-// Local demo only.
-// Replace with a real login flow before production.
-
-
-/* ---------- normalisers ---------- */
-
-const normaliseRole = value => {
-  const text = String(value ?? "").trim().toLowerCase();
-
-  const role = ROLES.find(
-    r => r.toLowerCase() === text
-  );
-
-  return role || "Student";
-};
-
+const normaliseRole = value =>
+  ROLES.find(r => r.toLowerCase() === String(value ?? "").trim().toLowerCase()) || "Student";
 
 const normaliseCategory = c => ({
   id: Number(c.id),
-
   name: c.name,
-
-  parent:
-    c.parentId == null
-      ? null
-      : Number(c.parentId),
-
-  parentId:
-    c.parentId == null
-      ? null
-      : Number(c.parentId),
-
-  path:
-    c.path ||
-    c.name,
-
-  componentCount:
-    Number(c.componentCount || 0)
+  parent: c.parentId == null ? null : Number(c.parentId),
+  parentId: c.parentId == null ? null : Number(c.parentId),
+  path: c.path || c.name,
+  componentCount: Number(c.componentCount || 0)
 });
-
 
 const normaliseComponent = c => ({
   id: Number(c.id),
-
   name: c.name,
-
   description: c.description,
-
-  categoryId:
-    Number(c.categoryId),
-
-  categoryPath:
-    c.categoryPath || "",
-
-  type:
-    c.type,
-
-  language:
-    c.language ?? null,
-
-  notation:
-    c.notation ?? null,
-
-  keywords:
-    Array.isArray(c.keywords)
-      ? c.keywords
-      : [],
-
-  url:
-    c.url || "",
-
+  categoryId: Number(c.categoryId),
+  categoryPath: c.categoryPath || "",
+  type: c.type,
+  language: c.language ?? null,
+  notation: c.notation ?? null,
+  keywords: Array.isArray(c.keywords) ? c.keywords : [],
+  url: c.url || "",
   usage: {
-    used:
-      Number(c.usage?.used || 0),
-
-    queriedNotUsed:
-      Number(
-        c.usage?.queriedNotUsed || 0
-      )
+    used: Number(c.usage?.used || 0),
+    queriedNotUsed: Number(c.usage?.queriedNotUsed || 0)
   },
-
-  addedOn:
-    c.addedOn || ""
+  addedOn: c.addedOn || ""
 });
 
-
-/* ---------- catalogue ---------- */
-
 const Catalogue = {
-
-  _d: {
-    categories: [],
-    components: []
-  },
-
-  _token:
-    sessionStorage.getItem(TOKEN_KEY) || "",
-
-  _user: null,
-
+  _d: { categories: [], components: [] },
   _ready: false,
 
+  esc: s => String(s ?? "").replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])),
+  tech: c => (c.type === "Design" ? c.notation : c.language) || "",
 
-  /* ---------- utility ---------- */
+  _session() {
+    for (const storage of [sessionStorage, localStorage]) {
+      try {
+        const value = JSON.parse(storage.getItem(SESSION_KEY));
+        if (value?.token && value?.user) return value;
+      } catch {
+        // Ignore malformed persisted sessions.
+      }
+    }
+    return null;
+  },
 
-  esc: s =>
-    String(s ?? "").replace(
-      /[&<>"']/g,
-      c =>
-        ({
-          "&": "&amp;",
-          "<": "&lt;",
-          ">": "&gt;",
-          '"': "&quot;",
-          "'": "&#39;"
-        })[c]
-    ),
+  _tokenExpired(token) {
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+      return payload.exp * 1000 < Date.now();
+    } catch {
+      return true;
+    }
+  },
 
+  isLoggedIn() {
+    const session = this._session();
+    return !!session && !this._tokenExpired(session.token);
+  },
 
-  tech: c =>
-    (
-      c.type === "Design"
-        ? c.notation
-        : c.language
-    ) || "",
-
-
-  /* ---------- role ---------- */
+  user() {
+    const session = this._session();
+    return session ? { ...session.user, role: normaliseRole(session.user.role) } : null;
+  },
 
   role() {
-
-    const saved =
-      localStorage.getItem(ROLE_KEY);
-
-    return normaliseRole(saved);
+    return this.user()?.role || "Student";
   },
 
-
-  setRole(r) {
-
-    const canonical =
-      normaliseRole(r);
-
-    localStorage.setItem(
-      ROLE_KEY,
-      canonical
+  async login(username, password, remember = false) {
+    const response = await fetch(`${API_BASE}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Sign-in failed (${response.status})`);
+    this.logout();
+    (remember ? localStorage : sessionStorage).setItem(
+      SESSION_KEY,
+      JSON.stringify({ token: data.token, user: data.user })
     );
-
-    /*
-     * Role changed, so discard the previous
-     * JWT and authenticate again using the
-     * new role.
-     */
-
-    sessionStorage.removeItem(
-      TOKEN_KEY
-    );
-
-    this._token = "";
-    this._user = null;
-    this._ready = false;
+    return this.user();
   },
-
-
-  /* ---------- startup ---------- */
-
-  async init() {
-
-    if (this._ready) {
-      return this._d;
-    }
-
-    await this.loginAsCurrentRole();
-
-    await this.refresh();
-
-    this._ready = true;
-
-    return this._d;
-  },
-
-
-  /* ---------- authentication ---------- */
-
-  async loginAsCurrentRole() {
-
-    const selectedRole =
-      this.role();
-
-    const username =
-      selectedRole.toLowerCase();
-
-    const response =
-      await this.login(
-        username,
-        DEMO_PASSWORD
-      );
-
-    /*
-     * IMPORTANT:
-     *
-     * Backend returns:
-     *   "cataloguer"
-     *
-     * Frontend uses:
-     *   "Cataloguer"
-     *
-     * Do NOT overwrite ROLE_KEY with
-     * response.user.role directly.
-     */
-
-    if (response?.user?.role) {
-
-      const backendRole =
-        normaliseRole(
-          response.user.role
-        );
-
-      /*
-       * Keep the canonical frontend role.
-       * This also protects against the backend
-       * returning lowercase role names.
-       */
-
-      localStorage.setItem(
-        ROLE_KEY,
-        backendRole
-      );
-
-      this._user = {
-        ...response.user,
-        role: backendRole
-      };
-    }
-
-    return response;
-  },
-
-
-  async login(username, password) {
-
-    const res =
-      await fetch(
-        `${API_BASE}/auth/login`,
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type":
-              "application/json"
-          },
-
-          body: JSON.stringify({
-            username,
-            password
-          })
-        }
-      );
-
-    const data =
-      await res.json()
-        .catch(() => ({}));
-
-
-    if (!res.ok) {
-
-      throw new Error(
-        data.error ||
-        `Login failed (${res.status})`
-      );
-    }
-
-
-    this._token =
-      data.token || "";
-
-    this._user =
-      data.user || null;
-
-
-    sessionStorage.setItem(
-      TOKEN_KEY,
-      this._token
-    );
-
-
-    return data;
-  },
-
 
   logout() {
-
-    sessionStorage.removeItem(
-      TOKEN_KEY
-    );
-
-    this._token = "";
-    this._user = null;
+    sessionStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(SESSION_KEY);
     this._ready = false;
+    this._d = { categories: [], components: [] };
   },
 
-
-  /* ---------- API request helper ---------- */
-
-  async request(
-    path,
-    options = {},
-    retry = true
-  ) {
-
-    const headers =
-      new Headers(
-        options.headers || {}
-      );
-
-
-    if (
-      !headers.has("Content-Type") &&
-      options.body
-    ) {
-
-      headers.set(
-        "Content-Type",
-        "application/json"
-      );
-    }
-
-
-    if (this._token) {
-
-      headers.set(
-        "Authorization",
-        `Bearer ${this._token}`
-      );
-    }
-
-
-    const res =
-      await fetch(
-        `${API_BASE}${path}`,
-        {
-          ...options,
-          headers
-        }
-      );
-
-
-    const data =
-      await res
-        .json()
-        .catch(() => null);
-
-
-    /*
-     * Token expired/invalid.
-     * Re-login using the currently
-     * selected frontend role.
-     */
-
-    if (
-      res.status === 401 &&
-      retry
-    ) {
-
-      await this.loginAsCurrentRole();
-
-      return this.request(
-        path,
-        options,
-        false
-      );
-    }
-
-
-    if (!res.ok) {
-
-      throw new Error(
-        data?.error ||
-        `Request failed (${res.status})`
-      );
-    }
-
-
-    return data;
-  },
-
-
-  /* ---------- refresh data ---------- */
-
-  async refresh() {
-
-    const [
-      categories,
-      components
-    ] = await Promise.all([
-
-      this.request(
-        "/categories"
-      ),
-
-      this.request(
-        "/components"
-      )
-
-    ]);
-
-
-    this._d.categories =
-      categories.map(
-        normaliseCategory
-      );
-
-
-    this._d.components =
-      components.map(
-        normaliseComponent
-      );
-
-
+  async init() {
+    if (this._ready) return this._d;
+    await this.refresh();
+    this._ready = true;
     return this._d;
   },
 
+  async request(path, options = {}, retry = true) {
+    const headers = new Headers(options.headers || {});
+    if (options.body && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+    const session = this._session();
+    if (session) headers.set("Authorization", `Bearer ${session.token}`);
 
-  /* ---------- merge API results ---------- */
+    const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+    const data = await response.json().catch(() => null);
+    if (response.status === 401 && retry) {
+      this.logout();
+      location.replace(`${document.body?.dataset.root || ""}login.html`);
+      throw new Error("Your session has expired. Please sign in again.");
+    }
+    if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`);
+    return data;
+  },
+
+  async refresh() {
+    const [categories, components] = await Promise.all([
+      this.request("/categories"),
+      this.request("/components")
+    ]);
+    this._d.categories = categories.map(normaliseCategory);
+    this._d.components = components.map(normaliseComponent);
+    return this._d;
+  },
 
   _mergeComponents(rows) {
-
     for (const row of rows) {
-
-      const c =
-        normaliseComponent(row);
-
-
-      const index =
-        this._d.components.findIndex(
-          x => x.id === c.id
-        );
-
-
-      if (index === -1) {
-
-        this._d.components.push(c);
-
-      } else {
-
-        this._d.components[index] = c;
-      }
+      const component = normaliseComponent(row);
+      const index = this._d.components.findIndex(c => c.id === component.id);
+      index < 0
+        ? this._d.components.push(component)
+        : (this._d.components[index] = component);
     }
   },
-
-
-  /* ---------- categories ---------- */
 
   childrenOf(parentId) {
-
-    return this._d.categories.filter(
-      c => c.parent === parentId
-    );
+    return this._d.categories.filter(c => c.parent === parentId);
   },
-
 
   subtreeIds(id) {
-
-    return [
-      id,
-      ...this
-        .childrenOf(id)
-        .flatMap(c =>
-          this.subtreeIds(c.id)
-        )
-    ];
+    return [id, ...this.childrenOf(id).flatMap(c => this.subtreeIds(c.id))];
   },
-
 
   categoryPath(id) {
-
-    const local =
-      this._d.categories.find(
-        c => c.id === Number(id)
-      );
-
-
-    if (local) {
-
-      return (
-        local.path ||
-        (
-          local.parent != null
-            ? `${this.categoryPath(local.parent)} › `
-            : ""
-        ) +
-        local.name
-      );
-    }
-
-
-    const component =
-      this._d.components.find(
-        c =>
-          c.categoryId === Number(id)
-      );
-
-
-    return (
-      component?.categoryPath ||
-      ""
-    );
+    const category = this._d.categories.find(c => c.id === Number(id));
+    if (category) return category.path;
+    return this._d.components.find(c => c.categoryId === Number(id))?.categoryPath || "";
   },
-
-
-  /* ---------- component retrieval ---------- */
 
   get(id) {
-
-    return this._d.components.find(
-      c =>
-        c.id === Number(id)
-    );
+    return this._d.components.find(c => c.id === Number(id));
   },
 
-
-  list({
-    categoryId = null
-  } = {}) {
-
-    if (
-      categoryId == null
-    ) {
-
-      return [
-        ...this._d.components
-      ];
-    }
-
-
-    const ids =
-      this.subtreeIds(
-        Number(categoryId)
-      );
-
-
-    return this._d.components.filter(
-      c =>
-        ids.includes(
-          c.categoryId
-        )
-    );
+  list({ categoryId = null } = {}) {
+    if (categoryId == null) return [...this._d.components];
+    const ids = this.subtreeIds(Number(categoryId));
+    return this._d.components.filter(c => ids.includes(c.categoryId));
   },
-
-
-  /* ---------- add component ---------- */
 
   async add(c) {
-
-    const payload = {
-
-      name:
-        c.name,
-
-      description:
-        c.description,
-
-      categoryId:
-        Number(c.categoryId),
-
-      type:
-        c.type,
-
-      language:
-        c.type === "Code"
-          ? (c.language || "")
-          : null,
-
-      notation:
-        c.type === "Design"
-          ? (c.notation || "")
-          : null,
-
-      keywords:
-        c.keywords || [],
-
-      url:
-        c.url || ""
-    };
-
-
-    const created =
-      await this.request(
-        "/components",
-        {
-          method: "POST",
-
-          body:
-            JSON.stringify(payload)
-        }
-      );
-
-
-    this._mergeComponents([
-      created
-    ]);
-
-
-    return normaliseComponent(
-      created
-    );
+    const created = await this.request("/components", {
+      method: "POST",
+      body: JSON.stringify({
+        name: c.name,
+        description: c.description,
+        categoryId: Number(c.categoryId),
+        type: c.type,
+        language: c.type === "Code" ? (c.language || "") : null,
+        notation: c.type === "Design" ? (c.notation || "") : null,
+        keywords: c.keywords || [],
+        url: c.url || ""
+      })
+    });
+    this._mergeComponents([created]);
+    return normaliseComponent(created);
   },
-
-
-  /* ---------- delete component ---------- */
 
   async remove(id) {
-
-    await this.request(
-      `/components/${Number(id)}`,
-      {
-        method: "DELETE"
-      }
-    );
-
-
-    this._d.components =
-      this._d.components.filter(
-        c =>
-          c.id !== Number(id)
-      );
+    await this.request(`/components/${Number(id)}`, { method: "DELETE" });
+    this._d.components = this._d.components.filter(c => c.id !== Number(id));
   },
 
-
-  /* ---------- update keywords ---------- */
-
-  async setKeywords(
-    id,
-    keywords
-  ) {
-
-    const clean =
-      keywords
-        .map(s =>
-          String(s).trim()
-        )
-        .filter(Boolean);
-
-
-    const updated =
-      await this.request(
-        `/components/${Number(id)}/keywords`,
-        {
-          method: "PUT",
-
-          body:
-            JSON.stringify({
-              keywords: clean
-            })
-        }
-      );
-
-
-    this._mergeComponents([
-      updated
-    ]);
-
-
-    return normaliseComponent(
-      updated
-    );
+  async setKeywords(id, keywords) {
+    const updated = await this.request(`/components/${Number(id)}/keywords`, {
+      method: "PUT",
+      body: JSON.stringify({ keywords: keywords.map(s => String(s).trim()).filter(Boolean) })
+    });
+    this._mergeComponents([updated]);
+    return normaliseComponent(updated);
   },
-
-
-  /* ---------- search ---------- */
 
   async search(q) {
-
-    const data =
-      await this.request(
-        `/search?q=${encodeURIComponent(q)}`
-      );
-
-
-    const results =
-      data.results || [];
-
-
-    this._mergeComponents(
-      results
-    );
-
-
-    return results.map(
-      normaliseComponent
-    );
+    const data = await this.request(`/search?q=${encodeURIComponent(q)}`);
+    const results = data.results || [];
+    this._mergeComponents(results);
+    return results.map(normaliseComponent);
   },
-
-
-  /* ---------- mark used ---------- */
 
   async markUsed(id) {
-
-    const updated =
-      await this.request(
-        `/components/${Number(id)}/use`,
-        {
-          method: "POST"
-        }
-      );
-
-
-    this._mergeComponents([
-      updated
-    ]);
-
-
-    return normaliseComponent(
-      updated
-    );
+    const updated = await this.request(`/components/${Number(id)}/use`, { method: "POST" });
+    this._mergeComponents([updated]);
+    return normaliseComponent(updated);
   },
 
-
-  /* ---------- manager purge ---------- */
-
-  async purgeCandidates(
-    threshold
-  ) {
-
-    const rows =
-      await this.request(
-        `/stats/purge-candidates?threshold=${encodeURIComponent(
-          Number(threshold) || 15
-        )}`
-      );
-
-
-    return rows.map(
-      normaliseComponent
+  async purgeCandidates(threshold) {
+    const rows = await this.request(
+      `/stats/purge-candidates?threshold=${encodeURIComponent(Number(threshold) || 15)}`
     );
+    return rows.map(normaliseComponent);
   }
-
 };

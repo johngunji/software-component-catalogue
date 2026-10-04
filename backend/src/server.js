@@ -22,22 +22,15 @@ const {
 
 const SECRET =
     process.env.JWT_SECRET ||
-    "dev-only-secret-change-me";
+    (process.env.NODE_ENV === "development" ? "dev-only-secret" : null);
 
-
-if (
-    process.env.NODE_ENV === "production" &&
-    SECRET === "dev-only-secret-change-me"
-) {
-
-    throw new Error(
-        "Set JWT_SECRET in production"
-    );
-
+if (!SECRET) {
+    throw new Error("Set JWT_SECRET (or NODE_ENV=development for local work)");
 }
 
 
 const app = express();
+app.set("trust proxy", 1);
 
 
 app.use(
@@ -168,26 +161,40 @@ app.get(
    LOGIN
    ========================================================= */
 
+const failed = new Map();
+const WINDOW = 10 * 60 * 1000;
+const LIMIT = 10;
+const blocked = ip => {
+    const f = failed.get(ip);
+    if (!f || Date.now() - f.since > WINDOW) {
+        failed.delete(ip);
+        return false;
+    }
+    return f.count >= LIMIT;
+};
+const recordFailure = ip => {
+    const f = failed.get(ip);
+    if (!f || Date.now() - f.since > WINDOW) {
+        failed.set(ip, { count: 1, since: Date.now() });
+    } else {
+        f.count++;
+    }
+};
+
 app.post(
     "/api/auth/login",
     wrap((req, res) => {
 
-        const {
-            username,
-            password
-        } = req.body || {};
+        const { username, password } = req.body || {};
+        if (blocked(req.ip)) {
+            throw bad("Too many failed attempts. Try again in a few minutes.", 429);
+        }
 
 
         const user =
             typeof username === "string" &&
             typeof password === "string" &&
-            db
-                .prepare(`
-                    SELECT *
-                    FROM users
-                    WHERE username=?
-                `)
-                .get(username);
+            db.prepare("SELECT * FROM users WHERE username=?").get(username);
 
 
         if (
@@ -198,12 +205,11 @@ app.post(
             )
         ) {
 
-            throw bad(
-                "Invalid username or password",
-                401
-            );
+            recordFailure(req.ip);
+            throw bad("Invalid username or password", 401);
 
         }
+        failed.delete(req.ip);
 
 
         const token =
