@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS users(
     username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL
-        CHECK(role IN ('student','cataloguer','manager'))
+        CHECK(role IN ('user','cataloguer'))
 );
 
 CREATE TABLE IF NOT EXISTS categories(
@@ -106,7 +106,7 @@ if (!db.prepare("SELECT 1 FROM users LIMIT 1").get()) {
             throw new Error("Set SEED_PASSWORD (or NODE_ENV=development locally)");
         }
 
-        for (const role of ["student", "cataloguer", "manager"]) {
+        for (const role of ["user", "cataloguer"]) {
             const password =
                 process.env[`SEED_${role.toUpperCase()}_PASSWORD`] ||
                 fallback ||

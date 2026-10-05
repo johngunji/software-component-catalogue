@@ -5,9 +5,8 @@
    only scrypt hashes in SQLite.
 
    Required:
-     SEED_STUDENT_PASSWORD
+     SEED_USER_PASSWORD
      SEED_CATALOGUER_PASSWORD
-     SEED_MANAGER_PASSWORD
    ========================================================= */
 
 require("dotenv").config();
@@ -19,9 +18,8 @@ const {
 
 
 const REQUIRED = [
-    "SEED_STUDENT_PASSWORD",
-    "SEED_CATALOGUER_PASSWORD",
-    "SEED_MANAGER_PASSWORD"
+    "SEED_USER_PASSWORD",
+    "SEED_CATALOGUER_PASSWORD"
 ];
 
 
@@ -42,14 +40,11 @@ for (const variable of REQUIRED) {
 
 
 const passwords = {
-    student:
-        process.env.SEED_STUDENT_PASSWORD,
+    user:
+        process.env.SEED_USER_PASSWORD,
 
     cataloguer:
         process.env.SEED_CATALOGUER_PASSWORD,
-
-    manager:
-        process.env.SEED_MANAGER_PASSWORD
 };
 
 
@@ -109,7 +104,7 @@ try {
     );
 
     console.log(
-        "Updated accounts: student, cataloguer, manager"
+        "Updated accounts: user, cataloguer"
     );
 
 }

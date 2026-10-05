@@ -3,11 +3,11 @@
 const API_BASE =
   localStorage.getItem("componentHub.apiBase") ||
   "https://componenthub-backend.onrender.com/api";
-const ROLES = ["Student", "Cataloguer", "Manager"];
+const ROLES = ["User", "Cataloguer"];
 const SESSION_KEY = "componentHub.session";
 
 const normaliseRole = value =>
-  ROLES.find(r => r.toLowerCase() === String(value ?? "").trim().toLowerCase()) || "Student";
+  ROLES.find(r => r.toLowerCase() === String(value ?? "").trim().toLowerCase()) || "User";
 
 const normaliseCategory = c => ({
   id: Number(c.id),
@@ -76,7 +76,7 @@ const Catalogue = {
   },
 
   role() {
-    return this.user()?.role || "Student";
+    return this.user()?.role || "User";
   },
 
   async login(username, password, remember = false) {

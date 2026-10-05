@@ -24,7 +24,7 @@ const NAV = [
 const sum = (a, f) => a.reduce((t, x) => t + f(x), 0);
 
 let role = C.role();
-const U = C.user() || { username: "?", role: "Student" };
+const U = C.user() || { username: "?", role: "User" };
 let componentNotice = "";
 
 
@@ -87,9 +87,8 @@ document.body.innerHTML = `
 
     <div>
       <h4>Roles</h4>
-      <span>Student: search &amp; reuse</span>
+      <span>User: search &amp; reuse</span>
       <span>Cataloguer: add &amp; maintain</span>
-      <span>Manager: usage &amp; purge</span>
     </div>
 
   </div>
@@ -1743,7 +1742,7 @@ P.statistics = () => {
 
 
   ${
-    role === "Manager"
+    role === "Cataloguer"
       ? `
       <div class="card pad">
 

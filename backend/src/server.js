@@ -1252,10 +1252,7 @@ app.put(
 
 app.delete(
     "/api/components/:id",
-    allow(
-        "cataloguer",
-        "manager"
-    ),
+    allow("cataloguer"),
 
     wrap((req, res) => {
 
@@ -1509,7 +1506,7 @@ app.get(
 app.get(
     "/api/stats/purge-candidates",
 
-    allow("manager"),
+    allow("cataloguer"),
 
     wrap((req, res) => {
 
@@ -1602,7 +1599,7 @@ if (
 ) {
 
     app.listen(
-        process.env.PORT || 3000,
+        process.env.PORT || 5001,
         () => {
 
             console.log(

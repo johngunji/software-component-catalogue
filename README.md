@@ -1,482 +1,284 @@
-# Software Component Catalogue
+# ComponentHub
 
-A web-based software component cataloguing system for storing, searching,
-browsing, managing, and tracking reusable software components.
+ComponentHub is a web application for cataloguing reusable software
+components. A component can be either:
 
----
+- **Code**, with a programming language or technology
+- **Design**, with a design notation such as UML, ERD, or C4
 
-## 1. Project Overview
+Components are stored in hierarchical categories and can be found by name,
+description, technology, category, or keywords. The catalogue records both
+successful reuse and search results that were not subsequently used.
 
-The purpose of this project is to develop a catalogue of reusable software
-components.
+## Roles
 
-The catalogue can contain:
+The application has two roles:
 
-- Reusable code components
-- Reusable design components
-- Component descriptions
-- Keywords associated with components
-- Hierarchical categories
-- Component usage information
-- Search/query information
+| Role | Permissions |
+| --- | --- |
+| `user` | Sign in, browse categories, search the catalogue, view components, and mark a component as used |
+| `cataloguer` | All user permissions, plus add, edit, delete, and keyword-manage components; create and delete empty categories; view purge candidates |
 
-The system allows users to find reusable components using keywords and browse
-components through categories.
+## Demo login
 
----
+When the backend creates a new database in development mode without custom
+password variables, the seeded accounts use the fallback password below:
 
-## 2. Core Requirements
+| Username | Password | Role |
+| --- | --- | --- |
+| `user` | `changeme123` | User |
+| `cataloguer` | `changeme123` | Cataloguer |
 
-The system must support the following major operations:
+For a non-development environment, `SEED_PASSWORD` must be set. Individual
+account passwords can be set with `SEED_USER_PASSWORD` and
+`SEED_CATALOGUER_PASSWORD`.
 
-### Component Management
+## Repository layout
 
-- Add a component to the catalogue
-- Delete a component from the catalogue
-- View component details
-- Store reuse information for components
+```text
+frontend/
+  index.html                 Home page
+  login.html                 Sign-in page
+  pages/                     Browse, search, component, add, and statistics pages
+  js/catalogue.js            API client and browser session handling
+  js/login.js                Login form
+  js/app.js                  Application UI and page rendering
+  css/style.css              Application styles
 
-### Search
+backend/
+  src/server.js              Express API, authentication, validation, and routes
+  src/db.js                  SQLite schema, password hashing, and initial seed
+  src/catalogue-seed.js      Initial categories and catalogue components
+  scripts/reset-catalogue.js Reset categories and components to seed data
+  scripts/change-user-passwords.js
+                             Update account password hashes
+  componenthub.db            Local SQLite database when generated locally
+  .env.example               Backend environment variable template
 
-- Search components using keywords
-- Search using component information
-- Display matching components
-- Record search/query activity
+Problem-Statement.md         Functional requirements for the project
+```
 
-### Usage Tracking
+## Requirements
 
-The system should maintain:
+- Node.js `20.20.2` or a compatible Node.js 20 release
+- npm
 
-- Number of times a component has been used
-- Number of times a component appeared in a query but was not used
+The backend dependencies are defined in [backend/package.json](backend/package.json).
+The frontend is static HTML, CSS, and JavaScript and does not require a
+separate frontend build step.
 
-### Hierarchical Categorisation
+## Local setup
 
-Components should be organised into hierarchical categories.
+1. Install backend dependencies:
 
-Example:
+   ```bash
+   cd backend
+   npm install
+   ```
 
-    Backend
-    ├── Authentication
-    │   ├── JWT
-    │   └── OAuth
-    │
-    ├── Database
-    │   ├── SQL
-    │   └── NoSQL
-    │
-    └── API
-        ├── REST
-        └── GraphQL
+2. Copy the environment template:
 
-Users should be able to browse components through these categories.
+   ```bash
+   cp .env.example .env
+   ```
 
----
+3. Start the API:
 
-## 3. Planned Features
+   ```bash
+   npm start
+   ```
 
-### Main Pages
+   The API listens on port `5001` by default. Set `PORT` to use another port.
 
-- Home
-- Browse Components
-- Search
-- Component Details
-- Add Component
-- Categories
-- Statistics
+4. Serve the `frontend` directory with a static web server. For example:
 
-### Main Functions
+   ```bash
+   npx serve frontend -l 5500
+   ```
 
-- Component registration
-- Component deletion
-- Component search
-- Keyword management
-- Category management
-- Hierarchical browsing
-- Component usage tracking
-- Search/query tracking
-- Statistics dashboard
+5. Open the served `login.html` page and sign in with one of the demo
+   accounts. The frontend uses
+   `https://componenthub-backend.onrender.com/api` by default. For local
+   development, set the API base in the browser console before loading the
+   application:
+
+   ```js
+   localStorage.setItem("componentHub.apiBase", "http://localhost:5001/api");
+   ```
+
+   Then reload the page.
+
+The backend creates `componenthub.db` on first start. It creates the schema,
+two accounts, the initial category tree, and the initial catalogue
+components. `DB_PATH` can be set to use a different SQLite file.
+
+## Environment variables
+
+The backend reads variables from `backend/.env`:
+
+| Variable | Purpose |
+| --- | --- |
+| `NODE_ENV` | Use `development` for local fallback configuration |
+| `JWT_SECRET` | Secret used to sign authentication tokens outside development |
+| `CORS_ORIGIN` | Allowed frontend origin; defaults to permissive CORS when unset |
+| `PORT` | API port; defaults to `5001` |
+| `DB_PATH` | SQLite database path; defaults to `componenthub.db` |
+| `SEED_PASSWORD` | Fallback password for both initial accounts |
+| `SEED_USER_PASSWORD` | Initial password for the `user` account |
+| `SEED_CATALOGUER_PASSWORD` | Initial password for the `cataloguer` account |
 
----
+Do not commit `.env` files or real credentials.
+
+## Catalogue behaviour
 
-## 4. Project Architecture
-
-The project will follow a basic three-layer structure:
-
-    Frontend
-       |
-       | HTTP / API
-       ↓
-    Backend
-       |
-       | Database queries
-       ↓
-    Database
+### Components
 
-### Frontend
+Each component contains:
 
-Responsible for:
+- Name
+- Description
+- Type: `Code` or `Design`
+- Language or notation
+- Hierarchical category
+- Up to 20 case-insensitively unique keywords
+- Optional HTTP or HTTPS resource URL
+- Date added
+- Number of uses
+- Number of search appearances not followed by use
 
-- User interface
-- Pages
-- Forms
-- Search interface
-- Component display
-- API communication
+### Categories
 
-### Backend
+Categories form a tree. A category can be deleted only when it has no child
+categories and no components assigned to it. Browsing a parent category
+includes components in its descendant categories.
 
-Responsible for:
+### Search and usage
 
-- API endpoints
-- Business logic
-- Validation
-- Search logic
-- Component management
-- Usage tracking
-- Statistics
+Search accepts up to eight whitespace-separated terms and searches component
+names, descriptions, type, technology, category names, and keywords. Each
+matching component increments its `queriedNotUsed` counter. Marking a
+component as used increments `used` and decreases `queriedNotUsed`, without
+allowing that counter to become negative.
 
-### Database
+The statistics page shows component totals, category totals, total uses,
+search appearances not followed by use, category counts, and the most-used
+components. Cataloguers can also view components whose use count is below a
+chosen threshold.
 
-Responsible for storing:
+## API
 
-- Components
-- Categories
-- Keywords
-- Users
-- Usage records
-- Search/query records
+The API base path is `/api`. `GET /health` is public. Login is public; all
+other API requests require a bearer token returned by the login endpoint.
 
----
+### Authentication
 
-## 5. Repository Structure
+| Method | Endpoint | Access | Description |
+| --- | --- | --- | --- |
+| `POST` | `/api/auth/login` | Public | Authenticate with `username` and `password` |
+| `GET` | `/api/me` | Signed-in users | Return the authenticated user |
 
-    software-component-catalogue/
-    │
-    ├── frontend/
-    │   ├── index.html
-    │   ├── css/
-    │   ├── js/
-    │   └── assets/
-    │
-    ├── backend/
-    │
-    ├── database/
-    │
-    ├── docs/
-    │   ├── SRS/
-    │   ├── UML/
-    │   ├── DFD/
-    │   ├── ER/
-    │   ├── API/
-    │   └── Testing/
-    │
-    ├── tests/
-    │
-    ├── README.md
-    └── .gitignore
+### Categories and components
 
----
+| Method | Endpoint | Access | Description |
+| --- | --- | --- | --- |
+| `GET` | `/api/categories` | Signed-in users | List categories with paths and component counts |
+| `POST` | `/api/categories` | Cataloguer | Create a category |
+| `DELETE` | `/api/categories/:id` | Cataloguer | Delete an empty category |
+| `GET` | `/api/components` | Signed-in users | List components; supports `q`, `category`, `type`, `tech`, and `sort` |
+| `GET` | `/api/components/:id` | Signed-in users | Get one component |
+| `POST` | `/api/components` | Cataloguer | Add a component and its keywords |
+| `PUT` | `/api/components/:id` | Cataloguer | Replace component metadata and keywords |
+| `PUT` | `/api/components/:id/keywords` | Cataloguer | Replace only the component keywords |
+| `DELETE` | `/api/components/:id` | Cataloguer | Delete a component |
+| `POST` | `/api/components/:id/use` | Signed-in users | Record reuse of a component |
 
-## 6. Folder Responsibilities
+### Search and statistics
 
-### `frontend/`
+| Method | Endpoint | Access | Description |
+| --- | --- | --- | --- |
+| `GET` | `/api/search?q=...` | Signed-in users | Search the catalogue and record the query |
+| `GET` | `/api/stats` | Signed-in users | Return catalogue and usage statistics |
+| `GET` | `/api/stats/purge-candidates?threshold=15` | Cataloguer | List components used fewer than the threshold |
 
-All frontend code.
+Example login request:
 
-Examples:
+```bash
+curl -X POST http://localhost:5001/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"user","password":"changeme123"}'
+```
 
-- HTML
-- CSS
-- JavaScript
-- Images
-- Icons
+Use the returned token in subsequent requests:
 
-### `backend/`
+```bash
+curl http://localhost:5001/api/categories \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
 
-All backend/API code.
+## Database
 
-Examples:
+SQLite stores the following tables:
 
-- Routes
-- Models
-- Services
-- Validation
-- Error handling
+- `users`
+- `categories`
+- `components`
+- `keywords`
+- `component_keywords`
+- `query_log`
 
-### `database/`
+Passwords are stored as salted scrypt hashes. Authentication uses signed
+JSON Web Tokens with an eight-hour expiry. Foreign-key enforcement and WAL
+journaling are enabled for SQLite.
 
-Database-related files.
+## Catalogue reset and password changes
 
-Examples:
+Reset the categories and components to the built-in seed catalogue:
 
-- Database schema
-- SQL scripts
-- Seed/sample data
+```bash
+cd backend
+npm run reset-catalogue
+```
 
-### `docs/`
+The reset script preserves users and their passwords. It is destructive for
+catalogue data in the selected database.
 
-Software Engineering documentation.
+To update both account passwords, set the required variables and run:
 
-This includes:
+```bash
+cd backend
+SEED_USER_PASSWORD='new-user-password' \
+SEED_CATALOGUER_PASSWORD='new-cataloguer-password' \
+node scripts/change-user-passwords.js
+```
 
-- SRS
-- Use Case Diagram
-- Class Diagram
-- Sequence Diagram
-- Activity Diagram
-- DFD
-- ER Diagram
-- API Documentation
-- Testing Documentation
+Each password must contain at least eight characters.
 
-### `tests/`
+## Verification
 
-Automated and integration tests.
+Validate the backend and frontend JavaScript syntax:
 
----
+```bash
+node --check backend/src/db.js
+node --check backend/src/server.js
+node --check frontend/js/catalogue.js
+node --check frontend/js/app.js
+```
 
-## 7. Team Structure
+Check the API health endpoint while the backend is running:
 
-There are six members in the team.
+```bash
+curl http://localhost:5001/health
+```
 
-Each member will have an ownership area, but everyone should understand the
-complete system because the project will be presented and discussed as a team.
+The expected response is:
 
-### Suggested ownership
+```json
+{"ok":true}
+```
 
-| Member | Primary Area |
-|---|---|
-| Member 1 | Frontend |
-| Member 2 | Backend |
-| Member 3 | Database |
-| Member 4 | Component Management |
-| Member 5 | Search & Statistics |
-| Member 6 | Testing & Integration |
+## Functional source
 
-Ownership does not mean that a member works exclusively on that area.
-Integration and documentation will be shared.
-
----
-
-## 8. Git Workflow
-
-### Main Branch
-
-`main` contains the stable version of the project.
-
-Do not directly develop on `main`.
-
-### Feature Branches
-
-Each member should create a branch for their work.
-
-Example:
-
-    feature/frontend
-    feature/backend
-    feature/database
-    feature/component-management
-    feature/search
-    feature/testing
-
-### Workflow
-
-    main
-      ↓
-    Create feature branch
-      ↓
-    Work on feature
-      ↓
-    Commit changes
-      ↓
-    Push branch
-      ↓
-    Pull Request
-      ↓
-    Review
-      ↓
-    Merge into main
-
----
-
-## 9. Commit Guidelines
-
-Use clear commit messages.
-
-Good:
-
-    Add homepage layout
-    Implement component search API
-    Create component database schema
-    Add category management
-    Add component usage tracking
-
-Avoid:
-
-    changes
-    final
-    update
-    new code
-    test
-
----
-
-## 10. Important Git Rules
-
-### Do
-
-- Pull the latest `main` before starting major work
-- Work on your own feature branch
-- Make small, meaningful commits
-- Test your changes before creating a Pull Request
-- Explain what your Pull Request changes
-
-### Don't
-
-- Directly push development work to `main`
-- Commit passwords or API keys
-- Commit `.env` files
-- Commit `venv/`
-- Commit `node_modules/`
-- Delete another member's work without discussion
-- Make huge unrelated changes in one commit
-
----
-
-## 11. Documentation
-
-The project will require Software Engineering documentation.
-
-The documentation will include:
-
-- Software Requirements Specification
-- Functional requirements
-- Non-functional requirements
-- Use Case Diagram
-- Class Diagram
-- Sequence Diagram
-- Data Flow Diagram
-- ER Diagram
-- API Documentation
-- Testing Documentation
-- Edge Cases
-- Integration Failure Cases
-
-All diagrams and documentation should represent the actual implementation.
-
----
-
-## 12. Development Order
-
-The project should be developed in stages:
-
-    1. Project setup
-           ↓
-    2. Requirements
-           ↓
-    3. Database design
-           ↓
-    4. Backend APIs
-           ↓
-    5. Frontend pages
-           ↓
-    6. Frontend ↔ Backend integration
-           ↓
-    7. Testing
-           ↓
-    8. Documentation
-           ↓
-    9. Final integration
-           ↓
-    10. Demo / Presentation
-
----
-
-## 13. Initial Component Categories
-
-The initial catalogue can contain categories such as:
-
-### UI / Frontend
-
-- Button
-- Form
-- Navbar
-- Modal
-- Table
-- Search Bar
-
-### Authentication & Security
-
-- Login
-- JWT Authentication
-- Password Hashing
-- Role-Based Access Control
-
-### Database
-
-- CRUD Module
-- Database Connector
-- SQL Query
-- Connection Pool
-
-### API & Integration
-
-- REST API Client
-- API Authentication
-- GET Handler
-- POST Handler
-- Error Handler
-
-### File & Utility
-
-- File Upload
-- PDF Generator
-- CSV Import/Export
-- Validation Utility
-- Logging Utility
-
-### Design & Algorithms
-
-- Use Case Diagram
-- Class Diagram
-- Sequence Diagram
-- DFD
-- Searching Algorithm
-- Sorting Algorithm
-
-These are sample catalogue entries. The final catalogue should contain
-components that are actually represented and supported by the application.
-
----
-
-## 14. Definition of Done
-
-A feature is considered complete when:
-
-- The feature works locally
-- Input validation is implemented where required
-- Errors are handled
-- Frontend/backend integration works where applicable
-- The code is committed to the appropriate branch
-- Documentation is updated where necessary
-- The feature has been tested
-- The Pull Request is ready for review
-
----
-
-## 15. Project Goal
-
-The final system should demonstrate a working software component catalogue
-that allows users to:
-
-1. Store reusable components
-2. Search for components
-3. Browse components hierarchically
-4. Associate keywords with components
-5. Track component usage
-6. Track search/query activity
-7. Manage catalogue components
-
-The implementation, diagrams, API documentation, and testing should all
-describe the same system.
+The implementation follows the requirements in
+[Problem-Statement.md](Problem-Statement.md), including cataloguer
+maintenance, keyword association, keyword search, usage tracking, and
+hierarchical browsing.
