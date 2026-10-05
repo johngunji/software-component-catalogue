@@ -26,5 +26,5 @@ services:
 
     - type: static
       name: componenthub-frontend
-      buildCommand: ""
+      buildCommand: ''
       staticPublishPath: frontend
