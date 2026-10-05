@@ -25,6 +25,7 @@ const sum = (a, f) => a.reduce((t, x) => t + f(x), 0);
 
 let role = C.role();
 const U = C.user() || { username: "?", role: "Student" };
+let componentNotice = "";
 
 
 /* ---------- shared shell ---------- */
@@ -777,12 +778,46 @@ P.search = () => {
 
 /* ---------- COMPONENT DETAILS ---------- */
 
-P.component = () => {
+P.component = async () => {
 
   const id =
     Number(qs.get("id"));
 
-  const c = C.get(id);
+  const notice = componentNotice;
+  componentNotice = "";
+
+  let c = C.get(id);
+
+  if (!c) {
+    main.innerHTML = `
+      <div class="wrap">
+        <div class="card pad">Loading component...</div>
+      </div>
+    `;
+
+    try {
+      c = await C.getComponent(id);
+    } catch (err) {
+      if (err.status === 404) {
+        main.innerHTML =
+          head(
+            "Component not found",
+            "It may have been removed."
+          ) +
+          `
+          <div class="wrap">
+            <a class="btn" href="${url("browse")}">
+              Back to browse
+            </a>
+          </div>
+          `;
+        return;
+      }
+
+      showError(err);
+      return;
+    }
+  }
 
 
   if (!c) {
@@ -874,6 +909,16 @@ P.component = () => {
 </section>
 
 
+<div class="wrap">
+
+  ${
+    notice
+      ? `<p class="ok">${E(notice)}</p>`
+      : ""
+  }
+
+</div>
+
 <div class="wrap detail">
 
   <section>
@@ -940,6 +985,14 @@ P.component = () => {
       ${
         role === "Cataloguer"
           ? `
+          <button
+            class="btn ghost block"
+            id="edit"
+          >
+            ${ic("pencil")}
+            Edit
+          </button>
+
           <button
             class="btn ghost block"
             id="kw"
@@ -1090,6 +1143,11 @@ P.component = () => {
   };
 
 
+  if ($("#edit")) {
+    $("#edit").onclick = () => P.editComponent();
+  }
+
+
   if ($("#kw")) {
 
     $("#kw").onclick = async () => {
@@ -1150,6 +1208,163 @@ P.component = () => {
     };
   }
 
+  lucide.createIcons();
+};
+
+
+P.editComponent = async () => {
+
+  const id = Number(qs.get("id"));
+  let c;
+
+  if (role !== "Cataloguer") {
+    return;
+  }
+
+  main.innerHTML = `
+    <div class="wrap">
+      <div class="card pad">Loading component...</div>
+    </div>
+  `;
+
+  try {
+    c = await C.getComponent(id);
+  } catch (err) {
+    if (err.status === 404) {
+      main.innerHTML =
+        head(
+          "Component not found",
+          "It may have been removed."
+        ) +
+        `
+        <div class="wrap">
+          <a class="btn" href="${url("browse")}">
+            Back to browse
+          </a>
+        </div>
+        `;
+      return;
+    }
+
+    showError(err);
+    return;
+  }
+
+  const opt = (parent, depth = 0) =>
+    C.childrenOf(parent)
+      .map(category => `
+        <option
+          value="${category.id}"
+          ${category.id === c.categoryId ? "selected" : ""}
+        >
+          ${"\u00a0\u00a0".repeat(depth)}${E(category.name)}
+        </option>
+      ` + opt(category.id, depth + 1))
+      .join("");
+
+  main.innerHTML =
+    head(
+      "Edit component",
+      "Update the component metadata and resource reference."
+    ) +
+    `
+<div class="wrap narrow">
+
+  <form class="card pad form" id="edit-form" autocomplete="off">
+
+    <p class="bad" id="edit-err" hidden></p>
+
+    <label>
+      Name *
+      <input id="edit-name" autocomplete="off" required value="${E(c.name)}">
+    </label>
+
+    <div class="cols">
+      <label>
+        Category *
+        <select id="edit-cat" required>
+          ${opt(null)}
+        </select>
+      </label>
+
+      <label>
+        Type *
+        <select id="edit-type" required>
+          <option ${c.type === "Code" ? "selected" : ""}>Code</option>
+          <option ${c.type === "Design" ? "selected" : ""}>Design</option>
+        </select>
+      </label>
+    </div>
+
+    <label>
+      <span id="edit-tl">${c.type === "Design" ? "Notation" : "Language"}</span>
+      <input id="edit-tech" autocomplete="off" required value="${E(C.tech(c))}">
+    </label>
+
+    <label>
+      Description *
+      <textarea id="edit-desc" autocomplete="off" rows="4" required>${E(c.description)}</textarea>
+    </label>
+
+    <label>
+      Keywords
+      <input id="edit-kw" autocomplete="off" value="${E(c.keywords.join(", "))}">
+      <small>Separate with commas.</small>
+    </label>
+
+    <label>
+      Resource URL
+      <input id="edit-url" autocomplete="off" type="url" value="${E(c.url)}" placeholder="https://github.com/...">
+    </label>
+
+    <div class="actions">
+      <button type="button" class="btn ghost" id="edit-cancel">Cancel</button>
+      <button class="btn">Save Changes</button>
+    </div>
+
+  </form>
+
+</div>
+`;
+
+  $("#edit-type").onchange = () => {
+    $("#edit-tl").textContent =
+      $("#edit-type").value === "Design"
+        ? "Notation"
+        : "Language";
+  };
+
+  $("#edit-cancel").onclick = () => P.component();
+
+  $("#edit-form").onsubmit = async event => {
+    event.preventDefault();
+    const type = $("#edit-type").value;
+    const tech = $("#edit-tech").value.trim();
+    const error = $("#edit-err");
+
+    error.hidden = true;
+
+    try {
+      await C.updateComponent(id, {
+        name: $("#edit-name").value.trim(),
+        description: $("#edit-desc").value.trim(),
+        categoryId: Number($("#edit-cat").value),
+        type,
+        tech,
+        keywords: $("#edit-kw").value.split(","),
+        url: $("#edit-url").value.trim()
+      });
+
+      componentNotice = "Component updated successfully.";
+      P.component();
+      lucide.createIcons();
+    } catch (err) {
+      error.textContent = err.message;
+      error.hidden = false;
+    }
+  };
+
+  lucide.createIcons();
 };
 
 

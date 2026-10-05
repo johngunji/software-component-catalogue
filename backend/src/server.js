@@ -817,13 +817,21 @@ const setKeywords =
 const getOr404 =
     id => {
 
+        const componentId = Number(id);
+
+        if (!Number.isInteger(componentId) || componentId <= 0) {
+            throw bad(
+                "invalid component id"
+            );
+        }
+
         const row =
             db.prepare(`
                 SELECT *
                 FROM components
                 WHERE id=?
             `).get(
-                Number(id)
+                componentId
             );
 
 
@@ -1139,6 +1147,69 @@ app.post(
         res.status(201).json(
             hydrate([
                 getOr404(id)
+            ])[0]
+        );
+
+    })
+);
+
+
+app.put(
+    "/api/components/:id",
+    allow("cataloguer"),
+
+    wrap((req, res) => {
+
+        const existing =
+            getOr404(
+                req.params.id
+            );
+
+        const component =
+            parseComponent(
+                req.body
+            );
+
+        const keywords =
+            parseKeywords(
+                req.body?.keywords
+            );
+
+        const componentId =
+            existing.id;
+
+        db.transaction(() => {
+
+            db.prepare(`
+                UPDATE components
+                SET
+                    name=?,
+                    description=?,
+                    category_id=?,
+                    type=?,
+                    tech=?,
+                    url=?
+                WHERE id=?
+            `).run(
+                component.name,
+                component.description,
+                component.categoryId,
+                component.type,
+                component.tech,
+                component.url,
+                componentId
+            );
+
+            setKeywords(
+                componentId,
+                keywords
+            );
+
+        })();
+
+        res.json(
+            hydrate([
+                getOr404(componentId)
             ])[0]
         );
 

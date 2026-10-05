@@ -124,7 +124,11 @@ const Catalogue = {
       location.replace(`${document.body?.dataset.root || ""}login.html`);
       throw new Error("Your session has expired. Please sign in again.");
     }
-    if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`);
+    if (!response.ok) {
+      const error = new Error(data?.error || `Request failed (${response.status})`);
+      error.status = response.status;
+      throw error;
+    }
     return data;
   },
 
@@ -166,6 +170,12 @@ const Catalogue = {
     return this._d.components.find(c => c.id === Number(id));
   },
 
+  async getComponent(id) {
+    const component = await this.request(`/components/${Number(id)}`);
+    this._mergeComponents([component]);
+    return normaliseComponent(component);
+  },
+
   list({ categoryId = null } = {}) {
     if (categoryId == null) return [...this._d.components];
     const ids = this.subtreeIds(Number(categoryId));
@@ -188,6 +198,23 @@ const Catalogue = {
     });
     this._mergeComponents([created]);
     return normaliseComponent(created);
+  },
+
+  async updateComponent(id, c) {
+    const updated = await this.request(`/components/${Number(id)}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        name: c.name,
+        description: c.description,
+        categoryId: Number(c.categoryId),
+        type: c.type,
+        tech: c.tech || "",
+        keywords: c.keywords || [],
+        url: c.url || ""
+      })
+    });
+    this._mergeComponents([updated]);
+    return normaliseComponent(updated);
   },
 
   async remove(id) {
