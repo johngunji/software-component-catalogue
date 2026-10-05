@@ -1061,16 +1061,29 @@ P.component = () => {
 
 
   $("#use").onclick = async () => {
+    let resourceWindow = null;
 
     try {
 
+      if (c.url) {
+        resourceWindow = window.open("about:blank", "_blank");
+      }
+
       await C.markUsed(id);
+
+      if (resourceWindow) {
+        resourceWindow.location.href = c.url;
+      }
 
       P.component();
 
       lucide.createIcons();
 
     } catch (err) {
+
+      if (resourceWindow && !resourceWindow.closed) {
+        resourceWindow.close();
+      }
 
       showError(err);
     }
