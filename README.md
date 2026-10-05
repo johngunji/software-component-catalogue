@@ -25,6 +25,20 @@ components through categories.
 
 ---
 
+## Current implementation
+
+Backend (Node.js, Express, SQLite) and frontend (plain HTML/JS) are in
+`backend/` and `frontend/`. Start with `backend/README.md`.
+
+- Roles: **user** (search, browse, use) and **cataloguer** (add, edit, delete,
+  key words, categories, reports, purge)
+- Demo data: 67 components (47 code, 20 design), 49 categories, usage figures
+- Documentation: `docs/API.md`, `docs/REQUIREMENTS.md` (problem statement to
+  feature mapping), `docs/DEMO.md` (viva walkthrough)
+- Tests: `npm test` in `backend/`
+
+---
+
 ## 2. Core Requirements
 
 The system must support the following major operations:
@@ -245,13 +259,13 @@ complete system because the project will be presented and discussed as a team.
 
 ### Suggested ownership
 
-| Member | Primary Area |
-|---|---|
-| Member 1 | Frontend |
-| Member 2 | Backend |
-| Member 3 | Database |
-| Member 4 | Component Management |
-| Member 5 | Search & Statistics |
+| Member   | Primary Area          |
+| -------- | --------------------- |
+| Member 1 | Frontend              |
+| Member 2 | Backend               |
+| Member 3 | Database              |
+| Member 4 | Component Management  |
+| Member 5 | Search & Statistics   |
 | Member 6 | Testing & Integration |
 
 Ownership does not mean that a member works exclusively on that area.

@@ -1,41 +1,38 @@
 name: Deploy Frontend
 
 on:
-  push:
-    branches:
-      - johngunji
+    push:
+        branches:
+            - johngunji
 
-  workflow_dispatch:
+    workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+    contents: read
+    pages: write
+    id-token: write
 
 concurrency:
-  group: pages
-  cancel-in-progress: true
+    group: pages
+    cancel-in-progress: true
 
 jobs:
+    deploy:
+        environment:
+            name: github-pages
+            url: ${{ steps.deployment.outputs.page_url }}
 
-  deploy:
+        runs-on: ubuntu-latest
 
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
 
-    runs-on: ubuntu-latest
+            - name: Upload frontend
+              uses: actions/upload-pages-artifact@v3
+              with:
+                  path: ./frontend
 
-    steps:
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Upload frontend
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ./frontend
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+            - name: Deploy to GitHub Pages
+              id: deployment
+              uses: actions/deploy-pages@v4
