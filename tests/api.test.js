@@ -5,6 +5,8 @@ process.env.DB_PATH = ':memory:';
 process.env.NODE_ENV = 'development';
 process.env.JWT_SECRET = 'test-secret';
 process.env.SEED_PASSWORD = 'test-password-1';
+process.env.SEED_USER_PASSWORD = 'test-password-1';
+process.env.SEED_CATALOGUER_PASSWORD = 'test-password-1';
 process.env.USE_DEDUPE_SECONDS = '30';
 
 const test = require('node:test');

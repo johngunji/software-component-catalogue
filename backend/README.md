@@ -13,13 +13,35 @@ npm start                 # http://localhost:3000
 npm test                  # API tests (in-memory database)
 ```
 
+## Render deployment
+
+The repository includes a [Render blueprint](../render.yaml) for deploying
+the backend and frontend as two Render services. Create a Blueprint from the
+repository, then set the secret values requested by Render:
+
+- `JWT_SECRET`: a long random production secret
+- `SEED_USER_PASSWORD`: password for the `user` account
+- `SEED_CATALOGUER_PASSWORD`: password for the `cataloguer` account
+
+The backend uses the persistent disk at `/var/data` for SQLite. Do not remove
+that disk or change `DB_PATH` unless the database is intentionally being
+recreated. The default service names produce these URLs:
+
+- API: `https://componenthub-backend.onrender.com`
+- Frontend: `https://componenthub-frontend.onrender.com`
+
+If the service names are changed, update `CORS_ORIGIN` and
+`frontend/js/catalogue.js` to match the generated Render URLs.
+
 On the first start the database `componenthub.db` is created from
 `src/schema.sql` and filled with the demo catalogue
 (`src/catalogue-seed.js`: 67 components, 49 categories, usage figures
 and search history).
 
 Accounts (password `changeme123` in development, or the
-`SEED_*_PASSWORD` values from `.env`):
+`SEED_*_PASSWORD` values from `.env`). In production, set both
+`SEED_USER_PASSWORD` and `SEED_CATALOGUER_PASSWORD`, or set `SEED_PASSWORD`
+to use one password for both accounts.
 
 | Username     | Role       | Can do                                                                                                                   |
 | ------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------ |

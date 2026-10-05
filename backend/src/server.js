@@ -162,7 +162,7 @@ app.post(
    ========================================================= */
 
 app.use('/api', authenticate);
-app.use('/api/health', () => {
+app.use('/api/health', (req, res) => {
     // backend is running
     res.json({ok: true});
 });

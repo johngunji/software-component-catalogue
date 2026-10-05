@@ -1,0 +1,34 @@
+name: Backend CI
+
+on:
+    push:
+        branches:
+            - main
+            - gaurav
+            - johngunji
+    pull_request:
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+
+        defaults:
+            run:
+                working-directory: backend
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 20.20.2
+                  cache: npm
+                  cache-dependency-path: backend/package-lock.json
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Run API tests
+              run: npm test

@@ -36,6 +36,12 @@ Backend (Node.js, Express, SQLite) and frontend (plain HTML/JS) are in
 - Documentation: `docs/API.md`, `docs/REQUIREMENTS.md` (problem statement to
   feature mapping), `docs/DEMO.md` (viva walkthrough)
 - Tests: `npm test` in `backend/`
+- Deployment: Render Blueprint in `render.yaml`
+
+The production deployment is intended for Render: the backend runs as a
+Node.js web service and the frontend runs as a Render static site. The
+backend's SQLite database is stored on a Render persistent disk. See
+`backend/README.md` for setup and required secrets.
 
 ---
 

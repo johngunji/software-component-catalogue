@@ -1,0 +1,30 @@
+services:
+    - type: web
+      name: componenthub-backend
+      runtime: node
+      rootDir: backend
+      buildCommand: npm ci
+      startCommand: npm start
+      healthCheckPath: /health
+      envVars:
+          - key: NODE_ENV
+            value: production
+          - key: JWT_SECRET
+            sync: false
+          - key: CORS_ORIGIN
+            value: https://componenthub-frontend.onrender.com
+          - key: SEED_USER_PASSWORD
+            sync: false
+          - key: SEED_CATALOGUER_PASSWORD
+            sync: false
+          - key: DB_PATH
+            value: /var/data/componenthub.db
+      disk:
+          name: componenthub-data
+          mountPath: /var/data
+          sizeGB: 1
+
+    - type: static
+      name: componenthub-frontend
+      buildCommand: ""
+      staticPublishPath: frontend

@@ -67,17 +67,23 @@ const verifyPassword = (password, stored) => {
 if (!db.prepare('SELECT 1 FROM users LIMIT 1').get()) {
     db.transaction(() => {
         const fallback = process.env.SEED_PASSWORD;
-        if (!fallback && process.env.NODE_ENV !== 'development') {
+        const passwords = {
+            user: process.env.SEED_USER_PASSWORD || fallback,
+            cataloguer: process.env.SEED_CATALOGUER_PASSWORD || fallback,
+        };
+
+        if (
+            process.env.NODE_ENV !== 'development' &&
+            Object.values(passwords).some((password) => !password)
+        ) {
             throw new Error(
-                'Set SEED_PASSWORD (or NODE_ENV=development locally)',
+                'Set SEED_USER_PASSWORD and SEED_CATALOGUER_PASSWORD ' +
+                    '(or SEED_PASSWORD for both accounts)',
             );
         }
 
         for (const role of ['user', 'cataloguer']) {
-            const password =
-                process.env[`SEED_${role.toUpperCase()}_PASSWORD`] ||
-                fallback ||
-                'changeme123';
+            const password = passwords[role] || 'changeme123';
 
             db.prepare(
                 `
