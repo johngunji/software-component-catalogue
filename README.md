@@ -88,22 +88,21 @@ separate frontend build step.
    npm start
    ```
 
-   The API listens on port `5001` by default. Set `PORT` to use another port.
+   The API listens on port `3000` by default. Set `PORT` to use another port.
 
 4. Serve the `frontend` directory with a static web server. For example:
 
    ```bash
-   npx serve frontend -l 5500
+   npx serve frontend -l 5501
    ```
 
 5. Open the served `login.html` page and sign in with one of the demo
-   accounts. The frontend uses
-   `https://componenthub-backend.onrender.com/api` by default. For local
-   development, set the API base in the browser console before loading the
-   application:
+   accounts.    The frontend automatically uses `http://localhost:3000/api` on localhost
+   and `https://componenthub-backend.onrender.com/api` when deployed. A
+   manual override remains available:
 
    ```js
-   localStorage.setItem("componentHub.apiBase", "http://localhost:5001/api");
+   localStorage.setItem("componentHub.apiBase", "http://localhost:3000/api");
    ```
 
    Then reload the page.
@@ -121,7 +120,7 @@ The backend reads variables from `backend/.env`:
 | `NODE_ENV` | Use `development` for local fallback configuration |
 | `JWT_SECRET` | Secret used to sign authentication tokens outside development |
 | `CORS_ORIGIN` | Allowed frontend origin; defaults to permissive CORS when unset |
-| `PORT` | API port; defaults to `5001` |
+| `PORT` | API port; defaults to `3000` |
 | `DB_PATH` | SQLite database path; defaults to `componenthub.db` |
 | `SEED_PASSWORD` | Fallback password for both initial accounts |
 | `SEED_USER_PASSWORD` | Initial password for the `user` account |
@@ -167,14 +166,21 @@ chosen threshold.
 
 ## API
 
-The API base path is `/api`. `GET /health` is public. Login is public; all
-other API requests require a bearer token returned by the login endpoint.
+The API base path is `/api`. `GET /health`, login, signup OTP, and
+password-reset OTP endpoints are public. Catalogue API requests require a
+bearer token returned by the login endpoint.
 
 ### Authentication
 
 | Method | Endpoint | Access | Description |
 | --- | --- | --- | --- |
 | `POST` | `/api/auth/login` | Public | Authenticate with `username` and `password` |
+| `POST` | `/api/auth/signup` | Public | Start signup and send an email OTP |
+| `POST` | `/api/auth/signup/verify` | Public | Verify signup OTP and create a `user` account |
+| `POST` | `/api/auth/signup/resend` | Public | Resend signup OTP |
+| `POST` | `/api/auth/forgot-password` | Public | Start password reset by email |
+| `POST` | `/api/auth/forgot-password/resend` | Public | Resend password-reset OTP |
+| `POST` | `/api/auth/reset-password` | Public | Verify OTP and set a new password |
 | `GET` | `/api/me` | Signed-in users | Return the authenticated user |
 
 ### Categories and components
@@ -203,7 +209,7 @@ other API requests require a bearer token returned by the login endpoint.
 Example login request:
 
 ```bash
-curl -X POST http://localhost:5001/api/auth/login \
+curl -X POST http://localhost:3000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"user","password":"changeme123"}'
 ```
@@ -211,7 +217,7 @@ curl -X POST http://localhost:5001/api/auth/login \
 Use the returned token in subsequent requests:
 
 ```bash
-curl http://localhost:5001/api/categories \
+curl http://localhost:3000/api/categories \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
@@ -225,10 +231,25 @@ SQLite stores the following tables:
 - `keywords`
 - `component_keywords`
 - `query_log`
+- `pending_signups`
+- `password_resets`
 
 Passwords are stored as salted scrypt hashes. Authentication uses signed
 JSON Web Tokens with an eight-hour expiry. Foreign-key enforcement and WAL
 journaling are enabled for SQLite.
+
+## Signup and password reset OTP
+
+Signup and password reset use cryptographically secure six-digit email OTPs.
+Only OTP hashes are stored, codes expire after ten minutes, verification
+attempts are limited, and successful verification invalidates the OTP.
+Resending replaces the previous code. The client never chooses an account
+role; verified public signups always create the `user` role.
+
+Email delivery uses Resend through `RESEND_API_KEY`, `EMAIL_FROM`, and the
+optional `RESEND_API_URL` environment variables. Resend testing mode may only
+deliver to the permitted test recipient. Use a verified sending domain for
+general production delivery; never commit API keys or other secrets.
 
 ## Catalogue reset and password changes
 
@@ -267,7 +288,7 @@ node --check frontend/js/app.js
 Check the API health endpoint while the backend is running:
 
 ```bash
-curl http://localhost:5001/health
+curl http://localhost:3000/health
 ```
 
 The expected response is:

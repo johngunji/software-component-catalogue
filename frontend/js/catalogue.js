@@ -2,7 +2,9 @@
 
 const API_BASE =
   localStorage.getItem("componentHub.apiBase") ||
-  "https://componenthub-backend.onrender.com/api";
+  (["localhost", "127.0.0.1"].includes(location.hostname)
+    ? "http://localhost:3000/api"
+    : "https://componenthub-backend.onrender.com/api");
 const ROLES = ["User", "Cataloguer"];
 const SESSION_KEY = "componentHub.session";
 

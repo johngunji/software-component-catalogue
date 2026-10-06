@@ -82,6 +82,59 @@ CREATE INDEX IF NOT EXISTS idx_components_used
 ON components(used_count);
 `);
 
+try {
+    db.exec("ALTER TABLE users ADD COLUMN email TEXT");
+} catch (error) {
+    if (!String(error.message).includes("duplicate column name")) {
+        throw error;
+    }
+}
+
+db.exec(`
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
+ON users(email)
+WHERE email IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS pending_signups(
+    id INTEGER PRIMARY KEY,
+    signup_token_hash TEXT UNIQUE NOT NULL,
+    username TEXT NOT NULL,
+    email TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    otp_hash TEXT NOT NULL,
+    otp_expires_at INTEGER NOT NULL,
+    otp_attempts INTEGER NOT NULL DEFAULT 0,
+    last_sent_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_signups_username
+ON pending_signups(username);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_signups_email
+ON pending_signups(email);
+
+CREATE TABLE IF NOT EXISTS password_resets(
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL
+        REFERENCES users(id)
+        ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    reset_token_hash TEXT UNIQUE NOT NULL,
+    otp_hash TEXT NOT NULL,
+    otp_expires_at INTEGER NOT NULL,
+    otp_attempts INTEGER NOT NULL DEFAULT 0,
+    last_sent_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_password_resets_user
+ON password_resets(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_password_resets_email
+ON password_resets(email);
+`);
+
 const hashPassword = password => {
     const salt = crypto.randomBytes(16).toString("hex");
     const hash = crypto.scryptSync(password, salt, 64).toString("hex");

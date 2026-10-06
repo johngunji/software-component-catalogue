@@ -11,9 +11,11 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 
 const {
     db,
+    hashPassword,
     verifyPassword
 } = require("./db");
 
@@ -66,19 +68,11 @@ const bad = (
 
 
 const wrap = fn =>
-    (req, res, next) => {
-
-        try {
-
-            fn(req, res, next);
-
-        } catch (error) {
-
-            next(error);
-
-        }
-
-    };
+    (req, res, next) =>
+        Promise
+            .resolve()
+            .then(() => fn(req, res, next))
+            .catch(next);
 
 
 /* =========================================================
@@ -237,6 +231,407 @@ app.post(
             }
         });
 
+    })
+);
+
+
+/* =========================================================
+   SIGNUP AND EMAIL OTP
+   ========================================================= */
+
+const OTP_TTL = 10 * 60 * 1000;
+const OTP_ATTEMPT_LIMIT = 5;
+const OTP_RESEND_INTERVAL = 60 * 1000;
+const signupRate = new Map();
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const hashSignupValue = value =>
+    crypto
+        .createHmac("sha256", SECRET)
+        .update(value)
+        .digest("hex");
+
+const newOtp = () =>
+    String(crypto.randomInt(100000, 1000000));
+
+const newSignupToken = () =>
+    crypto.randomBytes(32).toString("hex");
+
+const rateLimited = (key, interval) => {
+    const now = Date.now();
+    const previous = signupRate.get(key) || 0;
+    if (now - previous < interval) return true;
+    signupRate.set(key, now);
+    return false;
+};
+
+const sendOtpEmail = async (email, otp, subject = "Your ComponentHub verification code") => {
+    if (!process.env.RESEND_API_KEY || !process.env.EMAIL_FROM) {
+        throw bad("Email service is not configured.", 503);
+    }
+
+    const response = await fetch(
+        process.env.RESEND_API_URL || "https://api.resend.com/emails",
+        {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                from: process.env.EMAIL_FROM,
+                to: [email],
+                subject,
+                text: `Your ComponentHub verification code is ${otp}. It expires in 10 minutes.`
+            })
+        }
+    );
+
+    if (!response.ok) {
+        throw bad("Unable to send verification email.", 502);
+    }
+};
+
+const createPendingSignup = db.transaction((signup, otp, token) => {
+    db.prepare(`
+        INSERT INTO pending_signups(
+            signup_token_hash, username, email, password_hash,
+            otp_hash, otp_expires_at, last_sent_at, created_at
+        )
+        VALUES(?,?,?,?,?,?,?,?)
+    `).run(
+        hashSignupValue(token),
+        signup.username,
+        signup.email,
+        hashPassword(signup.password),
+        hashSignupValue(`${token}:${otp}`),
+        Date.now() + OTP_TTL,
+        Date.now(),
+        Date.now()
+    );
+});
+
+app.post(
+    "/api/auth/signup",
+    wrap(async (req, res) => {
+        const {
+            username,
+            email,
+            password,
+            confirmPassword
+        } = req.body || {};
+
+        if (
+            typeof username !== "string" ||
+            typeof email !== "string" ||
+            typeof password !== "string" ||
+            typeof confirmPassword !== "string"
+        ) {
+            throw bad("Username, email, password and password confirmation are required.");
+        }
+
+        const cleanUsername = username.trim();
+        const cleanEmail = email.trim().toLowerCase();
+        if (!cleanUsername) throw bad("Username is required.");
+        if (!emailPattern.test(cleanEmail)) throw bad("Enter a valid email address.");
+        if (password.length < 8) throw bad("Password must be at least 8 characters.");
+        if (password !== confirmPassword) throw bad("Passwords do not match.");
+        if (db.prepare("SELECT id FROM users WHERE username=?").get(cleanUsername)) {
+            throw bad("Username already exists.", 409);
+        }
+        if (db.prepare("SELECT id FROM users WHERE email=?").get(cleanEmail)) {
+            throw bad("Email already exists.", 409);
+        }
+        if (rateLimited(`signup:${req.ip}`, OTP_RESEND_INTERVAL)) {
+            throw bad("Please wait before requesting another verification code.", 429);
+        }
+
+        db.prepare("DELETE FROM pending_signups WHERE username=? OR email=?")
+            .run(cleanUsername, cleanEmail);
+
+        const token = newSignupToken();
+        const otp = newOtp();
+        createPendingSignup(
+            { username: cleanUsername, email: cleanEmail, password },
+            otp,
+            token
+        );
+
+        try {
+            await sendOtpEmail(cleanEmail, otp);
+        } catch (error) {
+            db.prepare("DELETE FROM pending_signups WHERE signup_token_hash=?")
+                .run(hashSignupValue(token));
+            throw error;
+        }
+
+        res.status(202).json({
+            message: "Verification code sent.",
+            signupToken: token,
+            email: cleanEmail
+        });
+    })
+);
+
+app.post(
+    "/api/auth/signup/resend",
+    wrap(async (req, res) => {
+        const { signupToken } = req.body || {};
+        if (typeof signupToken !== "string" || !signupToken) {
+            throw bad("Signup verification is required.");
+        }
+        if (rateLimited(`resend:${req.ip}`, OTP_RESEND_INTERVAL)) {
+            throw bad("Please wait before requesting another verification code.", 429);
+        }
+
+        const signup = db.prepare(`
+            SELECT * FROM pending_signups WHERE signup_token_hash=?
+        `).get(hashSignupValue(signupToken));
+        if (!signup) throw bad("Signup verification is invalid or expired.", 400);
+
+        const otp = newOtp();
+        await sendOtpEmail(signup.email, otp);
+        db.prepare(`
+            UPDATE pending_signups
+            SET otp_hash=?, otp_expires_at=?, otp_attempts=0, last_sent_at=?
+            WHERE id=?
+        `).run(
+            hashSignupValue(`${signupToken}:${otp}`),
+            Date.now() + OTP_TTL,
+            Date.now(),
+            signup.id
+        );
+        res.json({ message: "Verification code resent.", email: signup.email });
+    })
+);
+
+app.post(
+    "/api/auth/signup/verify",
+    wrap((req, res) => {
+        const { signupToken, otp } = req.body || {};
+        if (typeof signupToken !== "string" || !/^\d{6}$/.test(String(otp))) {
+            throw bad("Enter the 6-digit verification code.");
+        }
+
+        const signup = db.prepare(`
+            SELECT * FROM pending_signups WHERE signup_token_hash=?
+        `).get(hashSignupValue(signupToken));
+        if (!signup) throw bad("Signup verification is invalid or expired.", 400);
+        if (signup.otp_expires_at < Date.now()) {
+            db.prepare("DELETE FROM pending_signups WHERE id=?").run(signup.id);
+            throw bad("Verification code has expired.", 400);
+        }
+        if (signup.otp_attempts >= OTP_ATTEMPT_LIMIT) {
+            throw bad("Too many incorrect verification attempts.", 429);
+        }
+
+        const expected = Buffer.from(signup.otp_hash, "hex");
+        const actual = Buffer.from(hashSignupValue(`${signupToken}:${otp}`), "hex");
+        db.prepare("UPDATE pending_signups SET otp_attempts=otp_attempts+1 WHERE id=?")
+            .run(signup.id);
+        if (
+            expected.length !== actual.length ||
+            !crypto.timingSafeEqual(expected, actual)
+        ) {
+            throw bad("Incorrect verification code.", 400);
+        }
+
+        const result = db.transaction(() => {
+            if (db.prepare("SELECT id FROM users WHERE username=? OR email=?")
+                .get(signup.username, signup.email)) {
+                throw bad("Username or email already exists.", 409);
+            }
+            const created = db.prepare(`
+                INSERT INTO users(username, email, password_hash, role)
+                VALUES(?,?,?,?)
+            `).run(signup.username, signup.email, signup.password_hash, "user");
+            db.prepare("DELETE FROM pending_signups WHERE id=?").run(signup.id);
+            return created;
+        })();
+
+        res.status(201).json({
+            message: "Account created successfully.",
+            user: {
+                id: result.lastInsertRowid,
+                username: signup.username,
+                email: signup.email,
+                role: "user"
+            }
+        });
+    })
+);
+
+
+/* =========================================================
+   PASSWORD RESET
+   ========================================================= */
+
+const resetToken = () =>
+    crypto.randomBytes(32).toString("hex");
+
+const genericResetMessage =
+    "If an account exists for this email, a verification code has been sent.";
+
+app.post(
+    "/api/auth/forgot-password",
+    wrap(async (req, res) => {
+        const email =
+            typeof req.body?.email === "string"
+                ? req.body.email.trim().toLowerCase()
+                : "";
+
+        if (!emailPattern.test(email)) {
+            throw bad("Enter a valid email address.");
+        }
+
+        if (rateLimited(`forgot:${req.ip}`, OTP_RESEND_INTERVAL)) {
+            throw bad("Please wait before requesting another verification code.", 429);
+        }
+
+        const user = db.prepare(`
+            SELECT id, email FROM users WHERE email=?
+        `).get(email);
+        const token = resetToken();
+
+        if (user) {
+            db.prepare("DELETE FROM password_resets WHERE user_id=?").run(user.id);
+
+            const otp = newOtp();
+            db.prepare(`
+                INSERT INTO password_resets(
+                    user_id, email, reset_token_hash, otp_hash,
+                    otp_expires_at, last_sent_at, created_at
+                )
+                VALUES(?,?,?,?,?,?,?)
+            `).run(
+                user.id,
+                user.email,
+                hashSignupValue(token),
+                hashSignupValue(`${token}:${otp}`),
+                Date.now() + OTP_TTL,
+                Date.now(),
+                Date.now()
+            );
+
+            try {
+                await sendOtpEmail(
+                    user.email,
+                    otp,
+                    "Reset your ComponentHub password"
+                );
+            } catch (error) {
+                db.prepare("DELETE FROM password_resets WHERE user_id=?").run(user.id);
+                throw error;
+            }
+
+            return res.status(202).json({
+                message: genericResetMessage,
+                resetToken: token,
+                email: user.email
+            });
+        }
+
+        res.status(202).json({
+            message: genericResetMessage,
+            resetToken: token,
+            email
+        });
+    })
+);
+
+app.post(
+    "/api/auth/forgot-password/resend",
+    wrap(async (req, res) => {
+        const { resetToken: token } = req.body || {};
+        if (typeof token !== "string" || !token) {
+            throw bad("Password reset is invalid or expired.", 400);
+        }
+        if (rateLimited(`reset-resend:${req.ip}`, OTP_RESEND_INTERVAL)) {
+            throw bad("Please wait before requesting another verification code.", 429);
+        }
+
+        const reset = db.prepare(`
+            SELECT * FROM password_resets WHERE reset_token_hash=?
+        `).get(hashSignupValue(token));
+        if (!reset) throw bad("Password reset is invalid or expired.", 400);
+
+        const otp = newOtp();
+        await sendOtpEmail(
+            reset.email,
+            otp,
+            "Reset your ComponentHub password"
+        );
+        db.prepare(`
+            UPDATE password_resets
+            SET otp_hash=?, otp_expires_at=?, otp_attempts=0, last_sent_at=?
+            WHERE id=?
+        `).run(
+            hashSignupValue(`${token}:${otp}`),
+            Date.now() + OTP_TTL,
+            Date.now(),
+            reset.id
+        );
+
+        res.json({
+            message: "A new verification code has been sent.",
+            email: reset.email
+        });
+    })
+);
+
+app.post(
+    "/api/auth/reset-password",
+    wrap((req, res) => {
+        const {
+            resetToken: token,
+            otp,
+            password,
+            confirmPassword
+        } = req.body || {};
+
+        if (typeof token !== "string" || !token) {
+            throw bad("Password reset is invalid or expired.", 400);
+        }
+        if (!/^\d{6}$/.test(String(otp))) {
+            throw bad("Enter the 6-digit verification code.");
+        }
+        if (typeof password !== "string" || password.length < 8) {
+            throw bad("Password must be at least 8 characters.");
+        }
+        if (password !== confirmPassword) {
+            throw bad("Passwords do not match.");
+        }
+
+        const reset = db.prepare(`
+            SELECT * FROM password_resets WHERE reset_token_hash=?
+        `).get(hashSignupValue(token));
+        if (!reset) throw bad("Password reset is invalid or expired.", 400);
+        if (reset.otp_expires_at < Date.now()) {
+            db.prepare("DELETE FROM password_resets WHERE id=?").run(reset.id);
+            throw bad("Verification code has expired.", 400);
+        }
+        if (reset.otp_attempts >= OTP_ATTEMPT_LIMIT) {
+            throw bad("Too many incorrect verification attempts.", 429);
+        }
+
+        const expected = Buffer.from(reset.otp_hash, "hex");
+        const actual = Buffer.from(hashSignupValue(`${token}:${otp}`), "hex");
+        db.prepare("UPDATE password_resets SET otp_attempts=otp_attempts+1 WHERE id=?")
+            .run(reset.id);
+        if (
+            expected.length !== actual.length ||
+            !crypto.timingSafeEqual(expected, actual)
+        ) {
+            throw bad("Incorrect verification code.", 400);
+        }
+
+        db.transaction(() => {
+            db.prepare("UPDATE users SET password_hash=? WHERE id=?")
+                .run(hashPassword(password), reset.user_id);
+            db.prepare("DELETE FROM password_resets WHERE id=?").run(reset.id);
+        })();
+
+        res.json({ message: "Password reset successfully." });
     })
 );
 
@@ -1598,18 +1993,12 @@ if (
     require.main === module
 ) {
 
-    app.listen(
-        process.env.PORT || 5001,
-        () => {
-
-            console.log(
-                `ComponentHub API on :${
-                    process.env.PORT || 3000
-                }`
-            );
-
-        }
-    );
+    const port = process.env.PORT || 3000;
+    app.listen(port, () => {
+        console.log(
+            `ComponentHub API running on http://localhost:${port}`
+        );
+    });
 
 }
 

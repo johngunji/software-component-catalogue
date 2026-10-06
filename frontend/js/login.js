@@ -28,12 +28,13 @@ if (Catalogue.isLoggedIn()) {
       <main class="auth-main">
         <form class="card pad form auth-card" id="lf" novalidate>
           <div class="auth-logo"><span class="logo">${icon("box")}</span><b>ComponentHub</b></div>
-          <div><h2 class="auth-title">Sign in</h2><p class="muted">Use the account issued to you by the catalogue administrator.</p></div>
+          <div><h2 class="auth-title">Sign in</h2><p class="muted">Sign in to your ComponentHub account.</p></div>
           <p class="bad" id="err" role="alert" hidden></p>
           <label>Username<input id="u" autocomplete="username" autocapitalize="none" spellcheck="false" autofocus></label>
-          <label>Password<span class="pw"><input id="p" type="password" autocomplete="current-password"><button type="button" id="eye" aria-label="Show password">${icon("eye")}</button></span></label>
+          <label>Password<span class="pw"><input id="p" type="password" autocomplete="current-password"><button type="button" id="eye" aria-label="Show password">${icon("eye")}</button></span><a href="forgot-password.html">Forgot password?</a></label>
           <label class="chk"><input type="checkbox" id="rem"> Keep me signed in on this device</label>
           <button class="btn block" id="go">Sign in</button>
+          <p class="muted" style="text-align:center">Don't have an account? <a href="signup.html">Create account</a></p>
           <p class="muted" id="wake" hidden>The server is waking up. This can take up to a minute the first time…</p>
         </form>
       </main>
