@@ -1,7 +1,7 @@
 # ComponentHub
 
 ComponentHub is a web application for cataloguing reusable software
-components. A component can be either:
+Components. A Component can be either:
 
 - **Code**, with a programming language or technology
 - **Design**, with a design notation such as UML, ERD, or C4
