@@ -1,0 +1,36 @@
+@startuml
+
+title ComponentHub - View and Reuse a Component
+
+actor User
+participant "Component page\n(app.js)" as UI
+participant "Catalogue client\n(catalogue.js)" as Client
+participant "Express API" as API
+database "SQLite" as DB
+
+User -> UI: Open component details
+UI -> Client: getComponent(componentId)
+Client -> API: GET /api/components/{id}\nAuthorization: JWT
+API -> DB: Fetch and hydrate component
+DB --> API: Component record
+API --> Client: Component details
+Client -> Client: Merge component into cache
+Client --> UI: Normalized component
+UI -> User: Display metadata and reuse action
+
+User -> UI: Click Use / Open resource
+UI -> Client: markUsed(componentId)
+Client -> API: POST /api/components/{id}/use
+API -> DB: Increment used_count\nDecrement queried_not_used_count
+DB --> API: Updated component
+API --> Client: Updated component
+Client -> Client: Merge updated component
+Client --> UI: Usage recorded
+UI -> User: Open resource URL and refresh details
+
+alt Component not found or request unauthorized
+  API --> Client: 404/401 error
+  Client --> UI: Throw error or redirect
+  UI --> User: Show error
+end
+@enduml

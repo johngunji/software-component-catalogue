@@ -1,0 +1,40 @@
+@startuml
+
+title ComponentHub - Catalogue Page Initialization
+
+actor User
+participant "Catalogue page\n(app.js)" as UI
+participant "Catalogue client\n(catalogue.js)" as Client
+participant "Express API" as API
+database "SQLite" as DB
+
+User -> UI: Open protected page
+UI -> Client: isLoggedIn()
+alt Missing or expired session
+  Client --> UI: false
+  UI -> User: Redirect to login with return URL
+else Valid session
+  Client --> UI: true
+  UI -> Client: init()
+  Client -> Client: Read session and add Authorization header
+  par Load categories
+    Client -> API: GET /api/categories
+    API -> DB: Read category hierarchy
+    DB --> API: Categories
+    API --> Client: Categories
+  and Load components
+    Client -> API: GET /api/components
+    API -> DB: Read catalogue components
+    DB --> API: Components
+    API --> Client: Components
+  end
+  Client -> Client: Normalize and cache catalogue data
+  Client --> UI: Ready catalogue data
+  UI -> User: Render requested page
+end
+
+alt API returns 401 during a request
+  Client -> Client: Clear session
+  Client -> User: Redirect to login
+end
+@enduml

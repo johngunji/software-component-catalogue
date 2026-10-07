@@ -1,0 +1,31 @@
+@startuml
+
+title ComponentHub - Cataloguer Adds a Component
+
+actor Cataloguer
+participant "Add component page\n(app.js)" as UI
+participant "Catalogue client\n(catalogue.js)" as Client
+participant "Express API" as API
+database "SQLite" as DB
+
+Cataloguer -> UI: Enter component metadata
+UI -> UI: Validate type, category and technology
+UI -> Client: add(component)
+Client -> API: POST /api/components\nAuthorization: JWT
+API -> API: Authenticate JWT\nCheck Cataloguer role
+alt Not authenticated or not a Cataloguer
+  API --> Client: 401/403 error
+  Client --> UI: Throw error
+  UI --> Cataloguer: Show permission error
+else Authorized
+  API -> API: Parse component and keywords
+  API -> DB: Insert component and keywords transactionally
+  DB --> API: New component ID
+  API -> DB: Hydrate created component
+  DB --> API: Complete component
+  API --> Client: 201 created component
+  Client -> Client: Merge component into cache
+  Client --> UI: Created component
+  UI -> Cataloguer: Show success and new component
+end
+@enduml

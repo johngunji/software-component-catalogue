@@ -1,0 +1,51 @@
+@startuml
+
+title ComponentHub - Account Signup and Email Verification
+
+actor User
+participant "Signup page\n(signup.js)" as UI
+participant "Express API" as API
+participant "Email service\n(Resend)" as Mail
+database "SQLite" as DB
+
+User -> UI: Enter username, email and passwords
+UI -> UI: Validate fields and password match
+alt Invalid form
+  UI --> User: Show validation error
+else Valid form
+  UI -> API: POST /api/auth/signup
+  API -> DB: Check username and email uniqueness
+  API -> API: Generate signup token and OTP\nHash password and OTP
+  API -> DB: Insert pending signup
+  API -> Mail: Send six-digit OTP email
+  alt Email service failure
+    API -> DB: Delete pending signup
+    API --> UI: 503/502 error
+    UI --> User: Show delivery error
+  else OTP sent
+    API --> UI: 202 with signup token and email
+    UI -> User: Display OTP step
+    User -> UI: Enter OTP
+    UI -> API: POST /api/auth/signup/verify
+    API -> DB: Load pending signup
+    API -> API: Check expiry, attempts and OTP hash
+    alt Invalid or expired OTP
+      API --> UI: 400/429 error
+      UI --> User: Show verification error
+    else Valid OTP
+      API -> DB: Create user and delete pending signup
+      API --> UI: Account created
+      UI -> User: Redirect to login
+    end
+  end
+end
+
+opt Resend OTP
+  User -> UI: Request new OTP
+  UI -> API: POST /api/auth/signup/resend
+  API -> DB: Load pending signup
+  API -> Mail: Send replacement OTP
+  API -> DB: Replace OTP hash and expiry
+  API --> UI: Resend confirmation
+end
+@enduml

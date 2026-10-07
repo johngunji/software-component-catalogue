@@ -1,0 +1,48 @@
+@startuml
+
+title ComponentHub - Cataloguer Maintains a Component
+
+actor Cataloguer
+participant "Component page\n(app.js)" as UI
+participant "Catalogue client\n(catalogue.js)" as Client
+participant "Express API" as API
+database "SQLite" as DB
+
+Cataloguer -> UI: Choose Edit, Keywords or Delete
+
+alt Edit metadata
+  UI -> Client: updateComponent(id, data)
+  Client -> API: PUT /api/components/{id}
+  API -> API: Authenticate and check Cataloguer role
+  API -> DB: Update metadata and keywords transactionally
+  DB --> API: Updated component
+  API --> Client: Updated component
+  Client -> Client: Merge component into cache
+  Client --> UI: Refresh details
+else Update keywords only
+  UI -> Client: setKeywords(id, keywords)
+  Client -> API: PUT /api/components/{id}/keywords
+  API -> API: Authenticate and check Cataloguer role
+  API -> DB: Replace component keywords
+  DB --> API: Updated component
+  API --> Client: Updated component
+  Client -> Client: Merge component into cache
+  Client --> UI: Refresh details
+else Delete component
+  Cataloguer -> UI: Confirm deletion
+  UI -> Client: remove(id)
+  Client -> API: DELETE /api/components/{id}
+  API -> API: Authenticate and check Cataloguer role
+  API -> DB: Delete component
+  DB --> API: Deletion complete
+  API --> Client: 204 No Content
+  Client -> Client: Remove component from cache
+  Client --> UI: Navigate to Browse
+end
+
+alt Validation, not found or permission failure
+  API --> Client: 400/403/404 error
+  Client --> UI: Throw error
+  UI --> Cataloguer: Show error
+end
+@enduml

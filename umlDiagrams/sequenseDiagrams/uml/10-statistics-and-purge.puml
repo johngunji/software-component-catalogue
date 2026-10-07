@@ -1,0 +1,45 @@
+@startuml
+
+title ComponentHub - Statistics and Purge Candidates
+
+actor Cataloguer
+participant "Statistics page\n(app.js)" as UI
+participant "Catalogue client\n(catalogue.js)" as Client
+participant "Express API" as API
+database "SQLite" as DB
+
+Cataloguer -> UI: Open Statistics page
+UI -> Client: init()
+Client --> UI: Cached catalogue
+UI -> Client: request(GET /stats)
+Client -> API: GET /api/stats\nAuthorization: JWT
+API -> API: Authenticate and check Cataloguer role
+API -> DB: Aggregate component, usage and category statistics
+DB --> API: Statistics
+API --> Client: Statistics
+Client --> UI: Render charts and tables
+
+Cataloguer -> UI: Set unused threshold
+UI -> Client: purgeCandidates(threshold)
+Client -> API: GET /api/stats/purge-candidates?threshold=n
+API -> API: Authenticate and check Cataloguer role
+API -> DB: Find components meeting usage threshold
+DB --> API: Candidate components
+API --> Client: Candidate list
+Client --> UI: Render purge actions
+
+Cataloguer -> UI: Confirm purge for candidate
+UI -> Client: remove(componentId)
+Client -> API: DELETE /api/components/{id}
+API -> DB: Delete candidate component
+DB --> API: Deletion complete
+API --> Client: 204 No Content
+Client -> Client: Remove component from cache
+Client --> UI: Refresh statistics and candidates
+
+alt Not authorized or request fails
+  API --> Client: 401/403/500 error
+  Client --> UI: Throw error
+  UI --> Cataloguer: Show error
+end
+@enduml

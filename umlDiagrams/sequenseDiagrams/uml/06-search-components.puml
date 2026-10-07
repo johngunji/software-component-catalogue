@@ -1,0 +1,32 @@
+@startuml
+
+title ComponentHub - Search Catalogue
+
+actor User
+participant "Search page\n(app.js)" as UI
+participant "Catalogue client\n(catalogue.js)" as Client
+participant "Express API" as API
+database "SQLite" as DB
+
+User -> UI: Enter keyword query
+UI -> UI: Update URL query parameter
+UI -> Client: search(query)
+Client -> API: GET /api/search?q=query\nAuthorization: JWT
+API -> DB: Search names, descriptions,\ntechnology and keywords
+DB --> API: Matching components
+API -> DB: Increment queried_not_used_count\nfor each result and write query log
+API --> Client: Query results
+Client -> Client: Merge results into local cache
+Client --> UI: Normalized results
+UI -> User: Display result count and cards
+
+alt Empty query
+  UI -> Client: Load all cached components
+  Client --> UI: Cached catalogue
+  UI --> User: Display all components
+else Request fails or session expires
+  API --> Client: Error response
+  Client --> UI: Throw error or redirect to login
+  UI --> User: Show error
+end
+@enduml

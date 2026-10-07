@@ -1,0 +1,32 @@
+@startuml
+
+title ComponentHub - User Login
+
+actor User
+participant "Login page\n(login.js)" as UI
+participant "Catalogue client\n(catalogue.js)" as Client
+participant "Express API" as API
+database "SQLite" as DB
+
+User -> UI: Enter username and password
+UI -> UI: Validate required fields
+alt Missing username or password
+  UI --> User: Show validation error
+else Valid credentials
+  UI -> Client: login(username, password, remember)
+  Client -> API: POST /api/auth/login
+  API -> DB: Find user by username
+  DB --> API: User record
+  API -> API: Verify password and sign JWT
+  alt Invalid credentials or rate limited
+    API --> Client: 401/429 error
+    Client --> UI: Throw login error
+    UI --> User: Show error and clear password
+  else Authenticated
+    API --> Client: JWT and user profile
+    Client -> Client: Store session in local/session storage
+    Client --> UI: Return normalized user
+    UI -> User: Redirect to requested page
+  end
+end
+@enduml

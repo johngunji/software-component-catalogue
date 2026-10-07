@@ -1,0 +1,24 @@
+@startuml
+
+title ComponentHub - Browse Components by Category
+
+actor User
+participant "Browse page\n(app.js)" as UI
+participant "Catalogue client\n(catalogue.js)" as Client
+
+User -> UI: Open Browse page
+UI -> Client: init()
+Client --> UI: Cached categories and components
+UI -> UI: Resolve selected category
+UI -> UI: Find category subtree recursively
+UI -> UI: Filter cached components by category IDs
+UI -> User: Display category tree and component cards
+
+User -> UI: Select category or component
+alt Select category
+  UI -> UI: Update category query parameter
+  UI -> User: Display matching component cards
+else Select component
+  UI -> User: Navigate to component details
+end
+@enduml
