@@ -1856,6 +1856,56 @@ app.get(
             const ext = extMap[component.artifact_format] || "txt";
             const filename = `${(component.name || "component").toLowerCase().replace(/[^a-z0-9._-]/g, "-")}.${ext}`;
             files.push({ filename, content: component.artifact_content });
+        } else if (component.example_content || component.install_command) {
+            const safeBase = (component.name || `component-${req.params.id}`).toLowerCase().replace(/[^a-z0-9._-]/g, "-");
+            const tech = String(component.tech || "").toLowerCase();
+            let ext = "js";
+            if (tech.includes("python") || tech.includes("py")) ext = "py";
+            else if (tech.includes("typescript") || tech.includes("ts") || tech.includes("react")) ext = "ts";
+            else if (tech.includes("javascript") || tech.includes("js") || tech.includes("node")) ext = "js";
+            else if (tech.includes("c#") || tech.includes("csharp")) ext = "cs";
+            else if (tech.includes("java")) ext = "java";
+            else if (tech.includes("c++") || tech.includes("cpp")) ext = "cpp";
+            else if (tech.includes("go")) ext = "go";
+            else if (tech.includes("rust")) ext = "rs";
+            else if (tech.includes("sql")) ext = "sql";
+            else if (tech.includes("yaml") || tech.includes("yml")) ext = "yaml";
+            else if (tech.includes("json")) ext = "json";
+            else if (tech.includes("html")) ext = "html";
+            else if (tech.includes("css")) ext = "css";
+
+            const readmeLines = [
+                `# ${component.name || "Component"}`,
+                "",
+                component.description || "Reusable software component.",
+                "",
+                component.install_command ? `## Installation\n\`\`\`bash\n${component.install_command}\n\`\`\`\n` : "",
+                component.reuse_method ? `## Reuse Approach\n${component.reuse_method}\n` : "",
+                component.usage_notes ? `## Usage Guidance\n${component.usage_notes}\n` : "",
+                component.example_content ? `## Example Adaptation\n\`\`\`${ext}\n${component.example_content}\n\`\`\`\n` : "",
+                component.url ? `## Documentation\n[Official Reference & Repository](${component.url})\n` : ""
+            ].filter(Boolean).join("\n");
+
+            files.push({ filename: "README.md", content: readmeLines });
+
+            if (component.example_content) {
+                files.push({ filename: `example.${ext}`, content: component.example_content });
+            }
+
+            if (component.install_command && (ext === "js" || ext === "ts")) {
+                const pkgJson = JSON.stringify({
+                    name: safeBase,
+                    version: "1.0.0",
+                    description: component.description || "",
+                    main: `example.${ext}`,
+                    scripts: { start: `node example.${ext}` }
+                }, null, 2);
+                files.push({ filename: "package.json", content: pkgJson });
+            } else if (component.install_command && ext === "py") {
+                const pkgMatch = component.install_command.match(/pip\s+install\s+([a-zA-Z0-9_\-]+)/);
+                const reqText = pkgMatch ? `${pkgMatch[1]}\n` : `# Dependencies for ${component.name}\n`;
+                files.push({ filename: "requirements.txt", content: reqText });
+            }
         }
 
         if (files.length === 0) {

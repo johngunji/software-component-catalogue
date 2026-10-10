@@ -6,6 +6,10 @@ import path from 'node:path';
 import os from 'node:os';
 
 const require = createRequire(import.meta.url);
+const tmpGlobal = fs.mkdtempSync(path.join(os.tmpdir(), 'componenthub-db-auth-init-'));
+process.env.DB_PATH = path.join(tmpGlobal, 'init-test.db');
+process.env.NODE_ENV = 'development';
+process.env.JWT_SECRET = 'dev-only-secret';
 const Database = require('../backend/node_modules/better-sqlite3');
 const { initDatabase, initSchema, hashPassword, verifyPassword, resolveDbPath } = require('../backend/src/db.js');
 

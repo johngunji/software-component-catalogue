@@ -480,4 +480,135 @@ describe('Code Components, Multi-File Packages & ZIP Integrity Audits', () => {
     assert.equal(compAfterDel.artifacts.length, 1);
     assert.equal(compAfterDel.artifacts[0].id, art1.id);
   });
+
+  test('Package Code components with metadata (e.g. Axios) automatically package into ZIP with README and example', async () => {
+    // 1. Fetch seeded Axios component (#5)
+    const res = await fetch(`${baseUrl}/api/components/5`, {
+      headers: { Authorization: `Bearer ${userToken}` }
+    });
+    assert.equal(res.status, 200);
+    const comp = await res.json();
+    assert.equal(comp.name, 'Axios');
+    assert.equal(comp.type, 'Code');
+
+    // 2. Request ZIP package for Axios
+    const zipRes = await fetch(`${baseUrl}/api/components/5/zip`, {
+      headers: { Authorization: `Bearer ${userToken}` }
+    });
+    assert.equal(zipRes.status, 200);
+    assert.equal(zipRes.headers.get('content-type'), 'application/zip');
+    assert.match(zipRes.headers.get('content-disposition'), /filename="axios\.zip"/i);
+
+    // 3. Extract and verify ZIP contents
+    const zipBuffer = Buffer.from(await zipRes.arrayBuffer());
+    const verifyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'axios-zip-'));
+    const zipPath = path.join(verifyDir, 'axios.zip');
+    fs.writeFileSync(zipPath, zipBuffer);
+
+    execSync(`unzip -t "${zipPath}"`);
+    execSync(`unzip -o "${zipPath}" -d "${verifyDir}/out"`);
+
+    assert.ok(fs.existsSync(path.join(verifyDir, 'out', 'README.md')), 'README.md should be in package');
+    assert.ok(fs.existsSync(path.join(verifyDir, 'out', 'example.js')), 'example.js should be in package');
+    assert.ok(fs.existsSync(path.join(verifyDir, 'out', 'package.json')), 'package.json should be in package');
+
+    const readmeContent = fs.readFileSync(path.join(verifyDir, 'out', 'README.md'), 'utf8');
+    assert.match(readmeContent, /# Axios/);
+    assert.match(readmeContent, /npm install axios/);
+    assert.match(readmeContent, /https:\/\/github.com\/axios\/axios/);
+
+    const exampleContent = fs.readFileSync(path.join(verifyDir, 'out', 'example.js'), 'utf8');
+    assert.match(exampleContent, /Axios/);
+
+    // Clean up
+    fs.rmSync(verifyDir, { recursive: true, force: true });
+  });
+
+  test('Design components preserve diagram artifacts and route separately from Code components', async () => {
+    // Fetch Design component (e.g. #55 ERD Template or #49 UML Class)
+    const res = await fetch(`${baseUrl}/api/components/55`, {
+      headers: { Authorization: `Bearer ${userToken}` }
+    });
+    assert.equal(res.status, 200);
+    const comp = await res.json();
+    assert.equal(comp.type, 'Design');
+    assert.ok(Array.isArray(comp.artifacts), 'Design component should have artifacts');
+    assert.ok(comp.artifacts.some(a => a.artifactFormat === 'mermaid'), 'Design component should include mermaid format');
+
+    // Download Design ZIP package
+    const zipRes = await fetch(`${baseUrl}/api/components/55/zip`, {
+      headers: { Authorization: `Bearer ${userToken}` }
+    });
+    assert.equal(zipRes.status, 200);
+  });
+
+  test('Python Code components (e.g. pytest) package into requirements.txt and example.py without package.json', async () => {
+    // 1. Fetch seeded pytest component (#37)
+    const res = await fetch(`${baseUrl}/api/components/37`, {
+      headers: { Authorization: `Bearer ${userToken}` }
+    });
+    assert.equal(res.status, 200);
+    const comp = await res.json();
+    assert.equal(comp.name, 'pytest');
+    assert.equal(comp.type, 'Code');
+
+    // 2. Request ZIP package
+    const zipRes = await fetch(`${baseUrl}/api/components/37/zip`, {
+      headers: { Authorization: `Bearer ${userToken}` }
+    });
+    assert.equal(zipRes.status, 200);
+
+    // 3. Extract and verify ZIP contents
+    const zipBuffer = Buffer.from(await zipRes.arrayBuffer());
+    const verifyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pytest-zip-'));
+    const zipPath = path.join(verifyDir, 'pytest.zip');
+    fs.writeFileSync(zipPath, zipBuffer);
+
+    execSync(`unzip -t "${zipPath}"`);
+    execSync(`unzip -o "${zipPath}" -d "${verifyDir}/out"`);
+
+    assert.ok(fs.existsSync(path.join(verifyDir, 'out', 'README.md')), 'README.md should be in package');
+    assert.ok(fs.existsSync(path.join(verifyDir, 'out', 'example.py')), 'example.py should be in package');
+    assert.ok(fs.existsSync(path.join(verifyDir, 'out', 'requirements.txt')), 'requirements.txt should be in package');
+    assert.ok(!fs.existsSync(path.join(verifyDir, 'out', 'package.json')), 'package.json should NOT be generated for Python');
+
+    const reqContent = fs.readFileSync(path.join(verifyDir, 'out', 'requirements.txt'), 'utf8');
+    assert.match(reqContent, /pytest/);
+
+    // Clean up
+    fs.rmSync(verifyDir, { recursive: true, force: true });
+  });
+
+  test('Usage count increments only on reuse action (download/use) and not upon viewing', async () => {
+    // 1. Get current used count
+    const initialRes = await fetch(`${baseUrl}/api/components/5`, {
+      headers: { Authorization: `Bearer ${userToken}` }
+    });
+    const initialComp = await initialRes.json();
+    const countBefore = initialComp.usage.used;
+
+    // 2. Viewing component repeatedly does NOT increment used_count
+    await fetch(`${baseUrl}/api/components/5`, { headers: { Authorization: `Bearer ${userToken}` } });
+    await fetch(`${baseUrl}/api/components/5`, { headers: { Authorization: `Bearer ${userToken}` } });
+
+    const viewCheck = await (await fetch(`${baseUrl}/api/components/5`, { headers: { Authorization: `Bearer ${userToken}` } })).json();
+    assert.equal(viewCheck.usage.used, countBefore, 'Viewing component must not increment used_count');
+
+    // 3. Trigger reuse action (e.g. markUsed via POST /use)
+    const useRes = await fetch(`${baseUrl}/api/components/5/use`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${userToken}` }
+    });
+    assert.equal(useRes.status, 200);
+    const usedComp = await useRes.json();
+    assert.equal(usedComp.usage.used, countBefore + 1, 'Marking component as used must increment used_count by exactly 1');
+
+    // 4. Trigger ZIP download
+    await fetch(`${baseUrl}/api/components/5/zip`, {
+      headers: { Authorization: `Bearer ${userToken}` }
+    });
+
+    const zipCheck = await (await fetch(`${baseUrl}/api/components/5`, { headers: { Authorization: `Bearer ${userToken}` } })).json();
+    assert.equal(zipCheck.usage.used, countBefore + 2, 'ZIP package download must increment used_count by exactly 1');
+  });
 });

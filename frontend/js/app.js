@@ -938,24 +938,148 @@ P.component = async () => {
   // Phase A & B: Artifact normalization
   const rawArtifacts = Array.isArray(c.artifacts) ? [...c.artifacts].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) || a.id - b.id) : [];
 
-  // If Code component and no artifacts but artifactContent exists, synthesize primary artifact
-  const codeArtifacts = rawArtifacts.length > 0
-    ? rawArtifacts
-    : (c.artifactContent ? [{
+  // If Code component and no artifacts, synthesize primary artifacts from content or metadata
+  const getSynthesizedCodeArtifacts = () => {
+    if (rawArtifacts.length > 0) return rawArtifacts;
+
+    if (c.artifactContent) {
+      const ext = { javascript: "js", typescript: "ts", python: "py", json: "json", yaml: "yaml", markdown: "md", html: "html", css: "css" }[c.artifactFormat] || "txt";
+      return [{
         id: 0,
         componentId: c.id,
         name: `${c.name} Source`,
         description: c.usageNotes || c.description || "Primary component source file",
         variantType: "Source",
         deliveryMethod: c.deliveryMethod || "Editable Source",
-        artifactFormat: c.artifactFormat || (c.language || "typescript").toLowerCase(),
+        artifactFormat: c.artifactFormat || (c.tech || "typescript").toLowerCase(),
         content: c.artifactContent,
         binaryContent: null,
-        downloadFilename: `${(c.name || "code").toLowerCase().replace(/[^a-z0-9._-]/g, "-")}.${{ javascript: "js", typescript: "ts", python: "py", json: "json", yaml: "yaml", markdown: "md", html: "html", css: "css" }[c.artifactFormat] || "txt"}`,
+        downloadFilename: `${(c.name || "code").toLowerCase().replace(/[^a-z0-9._-]/g, "-")}.${ext}`,
         reuseMethod: c.reuseMethod || "Copy and edit",
         isPrimary: true,
         sortOrder: 0
-      }] : []);
+      }];
+    }
+
+    if (c.type === "Code") {
+      const cleanName = (c.name || "component").toLowerCase().replace(/[^a-z0-9._-]/g, "-");
+      const tech = String(c.tech || c.language || "").toLowerCase();
+      let ext = "js";
+      if (tech.includes("python") || tech.includes("py")) ext = "py";
+      else if (tech.includes("typescript") || tech.includes("ts") || tech.includes("react")) ext = "ts";
+      else if (tech.includes("javascript") || tech.includes("js") || tech.includes("node")) ext = "js";
+      else if (tech.includes("c#") || tech.includes("csharp")) ext = "cs";
+      else if (tech.includes("java")) ext = "java";
+      else if (tech.includes("c++") || tech.includes("cpp")) ext = "cpp";
+      else if (tech.includes("go")) ext = "go";
+      else if (tech.includes("rust")) ext = "rs";
+      else if (tech.includes("sql")) ext = "sql";
+      else if (tech.includes("yaml") || tech.includes("yml")) ext = "yaml";
+      else if (tech.includes("json")) ext = "json";
+      else if (tech.includes("html")) ext = "html";
+      else if (tech.includes("css")) ext = "css";
+
+      const list = [];
+
+      // 1. Example / Starter File
+      if (c.exampleContent) {
+        list.push({
+          id: 0,
+          componentId: c.id,
+          name: `Example Usage (${c.name})`,
+          description: "Integration and usage example snippet",
+          variantType: "Example",
+          deliveryMethod: c.deliveryMethod || "Package",
+          artifactFormat: ext,
+          content: c.exampleContent,
+          binaryContent: null,
+          downloadFilename: `example.${ext}`,
+          reuseMethod: c.reuseMethod || "Install package",
+          isPrimary: true,
+          sortOrder: 0
+        });
+      }
+
+      // 2. README Documentation File
+      const readmeDoc = [
+        `# ${c.name}`,
+        "",
+        c.description || "",
+        "",
+        c.installCommand ? `## Installation\n\`\`\`bash\n${c.installCommand}\n\`\`\`\n` : "",
+        c.reuseMethod ? `## Reuse Approach\n${c.reuseMethod}\n` : "",
+        c.usageNotes ? `## Usage Guidance\n${c.usageNotes}\n` : "",
+        c.exampleContent ? `## Example Adaptation\n\`\`\`${ext}\n${c.exampleContent}\n\`\`\`\n` : "",
+        c.url ? `## Official Reference\n[${c.name} Documentation & Repository](${c.url})\n` : ""
+      ].filter(Boolean).join("\n");
+
+      list.push({
+        id: 0,
+        componentId: c.id,
+        name: "README & Docs",
+        description: "Component setup and integration guide",
+        variantType: "Documentation",
+        deliveryMethod: c.deliveryMethod || "Package",
+        artifactFormat: "markdown",
+        content: readmeDoc,
+        binaryContent: null,
+        downloadFilename: "README.md",
+        reuseMethod: c.reuseMethod || "Install package",
+        isPrimary: !c.exampleContent,
+        sortOrder: 1
+      });
+
+      // 3. Starter Package Configuration
+      if (c.installCommand && (ext === "js" || ext === "ts")) {
+        const pkgContent = JSON.stringify({
+          name: cleanName,
+          version: "1.0.0",
+          description: c.description || "",
+          main: `example.${ext}`,
+          scripts: { start: `node example.${ext}` }
+        }, null, 2);
+        list.push({
+          id: 0,
+          componentId: c.id,
+          name: "package.json",
+          description: "Starter npm package configuration",
+          variantType: "Config",
+          deliveryMethod: "Package",
+          artifactFormat: "json",
+          content: pkgContent,
+          binaryContent: null,
+          downloadFilename: "package.json",
+          reuseMethod: "Install package",
+          isPrimary: false,
+          sortOrder: 2
+        });
+      } else if (c.installCommand && ext === "py") {
+        const pkgMatch = c.installCommand.match(/pip\s+install\s+([a-zA-Z0-9_\-]+)/);
+        const reqText = pkgMatch ? `${pkgMatch[1]}\n` : `# Dependencies for ${c.name}\n`;
+        list.push({
+          id: 0,
+          componentId: c.id,
+          name: "requirements.txt",
+          description: "Python package requirements",
+          variantType: "Config",
+          deliveryMethod: "Package",
+          artifactFormat: "txt",
+          content: reqText,
+          binaryContent: null,
+          downloadFilename: "requirements.txt",
+          reuseMethod: "Install package",
+          isPrimary: false,
+          sortOrder: 2
+        });
+      }
+
+      return list;
+    }
+
+    return [];
+  };
+
+  const codeArtifacts = getSynthesizedCodeArtifacts();
 
   // Design component artifact groups (grouped strictly by variantType)
   const designGroupsMap = rawArtifacts.reduce((groups, artifact) => {
@@ -1391,11 +1515,25 @@ P.component = async () => {
     <div class="card pad">
       <h3>Ways to reuse this component</h3>
       <div class="tags">
-        ${[
-          c.deliveryMethod,
-          (rawArtifacts.length > 0 || c.artifactContent) && (c.type === "Design" ? "Design diagrams" : "Code package"),
-          c.url && "Reference repository"
-        ].filter(Boolean).map(value => `<span>${E(value)}</span>`).join("")}
+        ${c.installCommand ? `
+          <button type="button" class="btn-tag-action" id="tag-copy-install" title="Copy ${E(c.installCommand)}">
+            ${ic("terminal")} Install package
+          </button>
+        ` : (c.deliveryMethod ? `<span class="btn-tag-action primary">${E(c.deliveryMethod)}</span>` : "")}
+
+        <button type="button" class="btn-tag-action primary" id="tag-download-pkg" title="Download component ZIP package">
+          ${ic("archive")} ${c.type === "Design" ? "Diagram Package" : "Code Package (ZIP)"}
+        </button>
+
+        ${c.url ? `
+          <a href="${E(c.url)}" target="_blank" rel="noopener noreferrer" class="btn-tag-action" id="tag-open-repo" title="Open official documentation or repository">
+            ${ic("external-link")} Reference repository
+          </a>
+        ` : `
+          <span class="tag-unavailable" title="No repository URL specified">
+            ${ic("slash")} No repository linked
+          </span>
+        `}
       </div>
       ${c.reuseMethod ? `<p class="reuse-method" style="margin-top:10px;"><strong>Recommended approach:</strong> ${E(c.reuseMethod)}</p>` : ""}
     </div>
@@ -2073,7 +2211,7 @@ P.component = async () => {
     }
   });
 
-  // Copy Install Command
+  // Copy Install Command in Sidebar
   const copyInstallBtn = $("#copy-install");
   if (copyInstallBtn) {
     copyInstallBtn.onclick = async () => {
@@ -2088,15 +2226,203 @@ P.component = async () => {
     };
   }
 
-  // Use Component Button
-  $("#use").onclick = async () => {
-    try {
-      await recordReuse();
-      componentNotice = "This component was recorded as used.";
-      P.component();
-    } catch (err) {
-      showError(err);
+  // Tag: Copy Install Command
+  const tagCopyInstall = $("#tag-copy-install");
+  if (tagCopyInstall) {
+    tagCopyInstall.onclick = async () => {
+      try {
+        await copyText(c.installCommand);
+        await recordReuse();
+        tagCopyInstall.innerHTML = `${ic("check")} Copied!`;
+        setTimeout(() => { tagCopyInstall.innerHTML = `${ic("terminal")} Install package`; lucide.createIcons(); }, 1800);
+      } catch (err) {
+        showError(err);
+      }
+    };
+  }
+
+  // Tag: Download Package ZIP
+  const tagDownloadPkg = $("#tag-download-pkg");
+  if (tagDownloadPkg) {
+    tagDownloadPkg.onclick = async () => {
+      try {
+        const cleanName = (c.name || "package").toLowerCase().replace(/[^a-z0-9._-]/g, "-");
+        const result = await C.downloadZip(id, `${cleanName}.zip`);
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(result.blob);
+        link.download = result.filename || `${cleanName}.zip`;
+        link.click();
+        URL.revokeObjectURL(link.href);
+        await recordReuse();
+      } catch (err) {
+        showError(err);
+      }
+    };
+  }
+
+  // Interactive Use Component Modal Dialog
+  const openUseModal = () => {
+    const existing = document.getElementById("use-modal-backdrop");
+    if (existing) existing.remove();
+
+    const cleanName = (c.name || "package").toLowerCase().replace(/[^a-z0-9._-]/g, "-");
+    const exampleSnippet = c.exampleContent || (codeArtifacts.length ? codeArtifacts[0].content : "");
+
+    const modal = document.createElement("div");
+    modal.id = "use-modal-backdrop";
+    modal.className = "use-modal-backdrop";
+    modal.innerHTML = `
+      <div class="use-modal-window" role="dialog" aria-modal="true" aria-labelledby="use-modal-title">
+        <div class="use-modal-header">
+          <h2 id="use-modal-title">${ic("check-circle")} Use ${E(c.name)}</h2>
+          <button type="button" class="btn ghost sm" id="use-modal-close" aria-label="Close modal">${ic("x")}</button>
+        </div>
+        <div class="use-modal-body">
+          <p style="color:#475569;margin:0 0 4px 0;font-size:13.5px;">Follow these steps to integrate and reuse <strong>${E(c.name)}</strong> in your software project.</p>
+
+          <div id="use-modal-notice" class="ok" style="margin-bottom:8px;" hidden></div>
+          <div id="use-modal-error" class="bad" style="margin-bottom:8px;" hidden></div>
+
+          <!-- Step 1: Delivery & Setup -->
+          <div class="use-step-card">
+            <div class="use-step-title">
+              <span class="code-meta-badge" style="background:#dbeafe;color:#1e40af;">1</span>
+              <span>${c.type === "Code" ? "Installation & Package Download" : "Artifact Setup"}</span>
+            </div>
+            ${c.installCommand ? `
+              <p style="font-size:12.5px;color:#64748b;margin:4px 0 6px 0;">Run this command in your project terminal:</p>
+              <div class="use-code-box">
+                <pre><code>${E(c.installCommand)}</code></pre>
+                <button type="button" id="use-modal-copy-install">${ic("copy")} Copy</button>
+              </div>
+            ` : ""}
+            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+              <button type="button" class="btn" id="use-modal-download-zip">
+                ${ic("archive")} Download Component Package (ZIP)
+              </button>
+              ${c.url ? `
+                <a href="${E(c.url)}" target="_blank" rel="noopener noreferrer" class="btn ghost" id="use-modal-open-repo">
+                  ${ic("external-link")} Reference Repository
+                </a>
+              ` : ""}
+            </div>
+          </div>
+
+          <!-- Step 2: Code Integration Example -->
+          ${exampleSnippet ? `
+            <div class="use-step-card">
+              <div class="use-step-title">
+                <span class="code-meta-badge" style="background:#dbeafe;color:#1e40af;">2</span>
+                <span>Integration & Usage Example</span>
+              </div>
+              <div class="use-code-box" style="align-items:flex-start;max-height:220px;">
+                <pre><code>${E(exampleSnippet)}</code></pre>
+                <button type="button" id="use-modal-copy-code">${ic("copy")} Copy Example</button>
+              </div>
+            </div>
+          ` : ""}
+
+          <!-- Step 3: Reuse Guidance & Best Practices -->
+          ${c.usageNotes || c.reuseMethod ? `
+            <div class="use-step-card">
+              <div class="use-step-title">
+                <span class="code-meta-badge" style="background:#dbeafe;color:#1e40af;">3</span>
+                <span>Guidance & Best Practices</span>
+              </div>
+              ${c.reuseMethod ? `<p style="font-size:13px;margin:0 0 6px 0;"><strong>Recommended approach:</strong> ${E(c.reuseMethod)}</p>` : ""}
+              ${c.usageNotes ? `<p style="font-size:12.5px;color:#475569;margin:0;">${E(c.usageNotes)}</p>` : ""}
+            </div>
+          ` : ""}
+        </div>
+        <div class="use-modal-actions">
+          <span style="font-size:12px;color:#64748b;">Times this component was used: <b id="use-modal-used-count">${c.usage.used}</b></span>
+          <button type="button" class="btn ghost" id="use-modal-done">Done</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+    lucide.createIcons();
+
+    const showNotice = msg => {
+      const el = $("#use-modal-notice");
+      if (el) { el.textContent = msg; el.hidden = false; }
+    };
+
+    const showModalError = err => {
+      const el = $("#use-modal-error");
+      if (el) { el.textContent = err?.message || String(err); el.hidden = false; }
+    };
+
+    const closeModal = () => {
+      modal.remove();
+    };
+
+    $("#use-modal-close").onclick = closeModal;
+    $("#use-modal-done").onclick = closeModal;
+    modal.onclick = e => { if (e.target === modal) closeModal(); };
+
+    // Modal Copy Install
+    const copyInstall = $("#use-modal-copy-install");
+    if (copyInstall) {
+      copyInstall.onclick = async () => {
+        try {
+          await copyText(c.installCommand);
+          await recordReuse();
+          copyInstall.innerHTML = `${ic("check")} Copied!`;
+          showNotice("Installation command copied and reuse recorded.");
+          const cnt = $("#use-modal-used-count");
+          if (cnt) cnt.textContent = String(c.usage.used);
+          setTimeout(() => { copyInstall.innerHTML = `${ic("copy")} Copy`; lucide.createIcons(); }, 1800);
+        } catch (err) {
+          showModalError(err);
+        }
+      };
     }
+
+    // Modal Download ZIP
+    const downloadZip = $("#use-modal-download-zip");
+    if (downloadZip) {
+      downloadZip.onclick = async () => {
+        try {
+          const result = await C.downloadZip(id, `${cleanName}.zip`);
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(result.blob);
+          link.download = result.filename || `${cleanName}.zip`;
+          link.click();
+          URL.revokeObjectURL(link.href);
+          await recordReuse();
+          showNotice("Package ZIP downloaded and reuse recorded.");
+          const cnt = $("#use-modal-used-count");
+          if (cnt) cnt.textContent = String(c.usage.used);
+        } catch (err) {
+          showModalError(err);
+        }
+      };
+    }
+
+    // Modal Copy Code
+    const copyCode = $("#use-modal-copy-code");
+    if (copyCode) {
+      copyCode.onclick = async () => {
+        try {
+          await copyText(exampleSnippet);
+          await recordReuse();
+          copyCode.innerHTML = `${ic("check")} Copied!`;
+          showNotice("Example code copied and reuse recorded.");
+          const cnt = $("#use-modal-used-count");
+          if (cnt) cnt.textContent = String(c.usage.used);
+          setTimeout(() => { copyCode.innerHTML = `${ic("copy")} Copy Example`; lucide.createIcons(); }, 1800);
+        } catch (err) {
+          showModalError(err);
+        }
+      };
+    }
+  };
+
+  // Use Component Button opens Integration & Reuse workflow modal
+  $("#use").onclick = () => {
+    openUseModal();
   };
 
   // Cataloguer Component Controls
