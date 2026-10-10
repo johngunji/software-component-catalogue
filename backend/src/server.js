@@ -12,12 +12,136 @@ const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const zlib = require("zlib");
 
 const {
     db,
     hashPassword,
     verifyPassword
 } = require("./db");
+
+/* =========================================================
+   ZIP ARCHIVE GENERATOR (Native Node.js zlib + CRC-32)
+   ========================================================= */
+
+const crc32Table = new Uint32Array(256);
+for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) {
+        c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    crc32Table[i] = c >>> 0;
+}
+
+function computeCrc32(buf) {
+    if (typeof zlib.crc32 === "function") {
+        return zlib.crc32(buf) >>> 0;
+    }
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < buf.length; i++) {
+        crc = (crc >>> 8) ^ crc32Table[(crc ^ buf[i]) & 0xFF];
+    }
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function createZipArchive(files = []) {
+    const localHeaders = [];
+    const centralHeaders = [];
+    let offset = 0;
+
+    const dosTime = 0x0000;
+    const dosDate = 0x5C21; // 2026-01-01
+
+    for (const file of files) {
+        let cleanName = String(file.filename || "file.txt").replace(/\\/g, "/").replace(/^\/+/, "");
+        if (cleanName.includes("..") || cleanName.includes("\0")) {
+            cleanName = cleanName.replace(/[^a-zA-Z0-9._\-\/]/g, "-").replace(/\.\.+/g, "-");
+        }
+        const nameBuf = Buffer.from(cleanName, "utf8");
+        const contentBuf = Buffer.isBuffer(file.content)
+            ? file.content
+            : Buffer.from(typeof file.content === "string" ? file.content : "", "utf8");
+
+        const isCompressible = contentBuf.length > 0;
+        const deflated = isCompressible ? zlib.deflateRawSync(contentBuf) : Buffer.alloc(0);
+        const useCompressed = deflated.length < contentBuf.length && isCompressible;
+        const finalData = useCompressed ? deflated : contentBuf;
+        const compMethod = useCompressed ? 8 : 0;
+        const crc = computeCrc32(contentBuf);
+
+        // Info-ZIP Unicode Path Extra Field (0x7075)
+        const nameCrc = computeCrc32(nameBuf);
+        const extraField = Buffer.alloc(9 + nameBuf.length);
+        extraField.writeUInt16LE(0x7075, 0);
+        extraField.writeUInt16LE(5 + nameBuf.length, 2);
+        extraField.writeUInt8(1, 4);
+        extraField.writeUInt32LE(nameCrc >>> 0, 5);
+        nameBuf.copy(extraField, 9);
+
+        // General purpose bit flag: 0x0800 (Bit 11: UTF-8)
+        const flags = 0x0800;
+
+        // Local Header (30 bytes + nameBuf.length + extraField.length)
+        const localHeader = Buffer.alloc(30 + nameBuf.length + extraField.length);
+        localHeader.writeUInt32LE(0x04034b50, 0);
+        localHeader.writeUInt16LE(20, 4);
+        localHeader.writeUInt16LE(flags, 6);
+        localHeader.writeUInt16LE(compMethod, 8);
+        localHeader.writeUInt16LE(dosTime, 10);
+        localHeader.writeUInt16LE(dosDate, 12);
+        localHeader.writeUInt32LE(crc >>> 0, 14);
+        localHeader.writeUInt32LE(finalData.length, 18);
+        localHeader.writeUInt32LE(contentBuf.length, 22);
+        localHeader.writeUInt16LE(nameBuf.length, 26);
+        localHeader.writeUInt16LE(extraField.length, 28);
+        nameBuf.copy(localHeader, 30);
+        extraField.copy(localHeader, 30 + nameBuf.length);
+
+        localHeaders.push(localHeader, finalData);
+
+        // Central Directory Header (46 bytes + nameBuf.length + extraField.length)
+        const centralHeader = Buffer.alloc(46 + nameBuf.length + extraField.length);
+        centralHeader.writeUInt32LE(0x02014b50, 0);
+        centralHeader.writeUInt16LE(20, 4);
+        centralHeader.writeUInt16LE(20, 6);
+        centralHeader.writeUInt16LE(flags, 8);
+        centralHeader.writeUInt16LE(compMethod, 10);
+        centralHeader.writeUInt16LE(dosTime, 12);
+        centralHeader.writeUInt16LE(dosDate, 14);
+        centralHeader.writeUInt32LE(crc >>> 0, 16);
+        centralHeader.writeUInt32LE(finalData.length, 20);
+        centralHeader.writeUInt32LE(contentBuf.length, 24);
+        centralHeader.writeUInt16LE(nameBuf.length, 28);
+        centralHeader.writeUInt16LE(extraField.length, 30);
+        centralHeader.writeUInt16LE(0, 32);
+        centralHeader.writeUInt16LE(0, 34);
+        centralHeader.writeUInt16LE(0, 36);
+        centralHeader.writeUInt32LE(0x81A40000, 38); // file permissions -rw-r--r--
+        centralHeader.writeUInt32LE(offset, 42);
+        nameBuf.copy(centralHeader, 46);
+        extraField.copy(centralHeader, 46 + nameBuf.length);
+
+        centralHeaders.push(centralHeader);
+        offset += localHeader.length + finalData.length;
+    }
+
+    const centralDirOffset = offset;
+    const centralDirBuffer = Buffer.concat(centralHeaders);
+    const centralDirSize = centralDirBuffer.length;
+
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    eocd.writeUInt16LE(0, 4);
+    eocd.writeUInt16LE(0, 6);
+    eocd.writeUInt16LE(files.length, 8);
+    eocd.writeUInt16LE(files.length, 10);
+    eocd.writeUInt32LE(centralDirSize, 12);
+    eocd.writeUInt32LE(centralDirOffset, 16);
+    eocd.writeUInt16LE(0, 20);
+
+    return Buffer.concat([...localHeaders, centralDirBuffer, eocd]);
+}
+
 
 
 /* =========================================================
@@ -32,16 +156,31 @@ if (!SECRET) {
     throw new Error("Set JWT_SECRET (or NODE_ENV=development for local work)");
 }
 
-
 const app = express();
 app.set("trust proxy", 1);
 
 
+const configuredCorsOrigins = new Set(
+    String(process.env.CORS_ORIGIN || "")
+        .split(",")
+        .map(origin => origin.trim())
+        .filter(Boolean)
+);
+
 app.use(
     cors({
-        origin:
-            process.env.CORS_ORIGIN ||
-            true
+        origin(origin, callback) {
+            if (
+                !origin ||
+                configuredCorsOrigins.has(origin) ||
+                /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)
+            ) {
+                callback(null, true);
+                return;
+            }
+
+            callback(new Error("Origin is not allowed by CORS"));
+        }
     })
 );
 
@@ -245,18 +384,22 @@ const OTP_RESEND_INTERVAL = 60 * 1000;
 const signupRate = new Map();
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Hash signup tokens and OTP values before storing or comparing them.
 const hashSignupValue = value =>
     crypto
         .createHmac("sha256", SECRET)
         .update(value)
         .digest("hex");
 
+// Generate a six-digit verification code for account signup or recovery.
 const newOtp = () =>
     String(crypto.randomInt(100000, 1000000));
 
+// Generate an opaque token used to continue a pending signup.
 const newSignupToken = () =>
     crypto.randomBytes(32).toString("hex");
 
+// Enforce a minimum delay between repeated signup or OTP requests.
 const rateLimited = (key, interval) => {
     const now = Date.now();
     const previous = signupRate.get(key) || 0;
@@ -265,6 +408,7 @@ const rateLimited = (key, interval) => {
     return false;
 };
 
+// Send a verification code through the configured email provider.
 const sendOtpEmail = async (email, otp, subject = "Your ComponentHub verification code") => {
     if (!process.env.RESEND_API_KEY || !process.env.EMAIL_FROM) {
         throw bad("Email service is not configured.", 503);
@@ -466,6 +610,7 @@ app.post(
    PASSWORD RESET
    ========================================================= */
 
+// Generate a short-lived password-reset token.
 const resetToken = () =>
     crypto.randomBytes(32).toString("hex");
 
@@ -657,6 +802,7 @@ app.get(
    CATEGORY HELPERS
    ========================================================= */
 
+// Build a category lookup map for API filtering and validation.
 const catMap = () =>
     new Map(
         db
@@ -732,6 +878,7 @@ const subtree = (
    INTO FRONTEND DATA MODEL
    ========================================================= */
 
+// Convert database rows into the public component API shape.
 function hydrate(rows) {
 
     if (!rows.length) {
@@ -771,6 +918,31 @@ function hydrate(rows) {
         });
 
 
+    const artifactsByComponent = {};
+    db.prepare(`
+        SELECT *
+        FROM component_artifacts
+        WHERE component_id IN (${ids.map(() => "?").join()})
+        ORDER BY sort_order, id
+    `).all(...ids).forEach(artifact => {
+        (artifactsByComponent[artifact.component_id] ??= []).push({
+            id: artifact.id,
+            name: artifact.name,
+            description: artifact.description,
+            variantType: artifact.variant_type,
+            deliveryMethod: artifact.delivery_method,
+            artifactFormat: artifact.artifact_format,
+            content: artifact.content,
+            binaryContent: artifact.binary_content ? artifact.binary_content.toString("base64") : null,
+            contentType: artifact.content_type,
+            downloadFilename: artifact.download_filename,
+            reuseMethod: artifact.reuse_method,
+            isPrimary: Boolean(artifact.is_primary),
+            sortOrder: artifact.sort_order,
+            createdAt: artifact.created_at
+        });
+    });
+
     return rows.map(row => ({
 
         id: row.id,
@@ -808,6 +980,15 @@ function hydrate(rows) {
 
         url:
             row.url,
+
+        artifactFormat: row.artifact_format || "",
+        artifactContent: row.artifact_content || "",
+        usageNotes: row.usage_notes || "",
+        exampleContent: row.example_content || "",
+        deliveryMethod: row.delivery_method || "",
+        reuseMethod: row.reuse_method || "",
+        installCommand: row.install_command || "",
+        artifacts: artifactsByComponent[row.id] || [],
 
         usage: {
             used:
@@ -880,6 +1061,7 @@ const ORDER = {
    FIND COMPONENTS
    ========================================================= */
 
+// Filter and rank catalogue components for browse and search endpoints.
 function find({
     q = "",
     category,
@@ -1003,6 +1185,7 @@ function find({
    COMPONENT INPUT VALIDATION
    ========================================================= */
 
+// Validate and normalize a create or update component request body.
 function parseComponent(
     body = {}
 ) {
@@ -1049,6 +1232,27 @@ function parseComponent(
                 300
             ),
 
+        artifactFormat:
+            stringValue(body.artifactFormat ?? body.artifact_format, 30),
+
+        artifactContent:
+            stringValue(body.artifactContent ?? body.artifact_content, 12000),
+
+        usageNotes:
+            stringValue(body.usageNotes ?? body.usage_notes, 2000),
+
+        exampleContent:
+            stringValue(body.exampleContent ?? body.example_content, 6000),
+
+        deliveryMethod:
+            stringValue(body.deliveryMethod ?? body.delivery_method, 60),
+
+        reuseMethod:
+            stringValue(body.reuseMethod ?? body.reuse_method, 60),
+
+        installCommand:
+            stringValue(body.installCommand ?? body.install_command, 300),
+
         categoryId:
             Number(
                 body.categoryId
@@ -1066,6 +1270,24 @@ function parseComponent(
             "name and description are required"
         );
 
+    }
+
+    if (
+        component.type === "Design" &&
+        !component.artifactContent
+    ) {
+        throw bad("design components require reusable artifact content");
+    }
+
+    if (
+        component.artifactFormat &&
+        ![
+            "snippet", "file", "package", "mermaid", "plantuml", "drawio", "svg", "png", "markdown",
+            "javascript", "typescript", "python", "json", "yaml", "txt", "html", "css", "sql", "sh", "bash",
+            "go", "rust", "java", "c", "cpp", "csharp", "php", "ruby", "dockerfile", "xml"
+        ].includes(component.artifactFormat.toLowerCase())
+    ) {
+        throw bad("Unsupported component artifact format");
     }
 
 
@@ -1113,7 +1335,113 @@ function parseComponent(
 
 
     return component;
+}
 
+// Validate the supported text artifact formats and safe download filename.
+function parseArtifact(body = {}) {
+    const allowed = [
+        "mermaid", "plantuml", "drawio", "svg", "png", "markdown",
+        "javascript", "typescript", "python", "json", "yaml", "txt",
+        "html", "css", "sql", "sh", "bash", "go", "rust", "java",
+        "c", "cpp", "csharp", "php", "ruby", "dockerfile", "xml"
+    ];
+    const extensions = {
+        mermaid: [".mmd", ".mermaid"],
+        plantuml: [".puml", ".plantuml"],
+        drawio: [".drawio", ".xml"],
+        svg: [".svg"],
+        png: [".png"],
+        markdown: [".md", ".markdown"],
+        javascript: [".js", ".mjs", ".cjs"],
+        typescript: [".ts", ".tsx"],
+        python: [".py"],
+        json: [".json"],
+        yaml: [".yaml", ".yml"],
+        txt: [".txt", ".keep", ".text", ".gitignore", ".env", ".dockerignore", ""],
+        html: [".html", ".htm"],
+        css: [".css", ".scss", ".sass", ".less"],
+        sql: [".sql"],
+        sh: [".sh"],
+        bash: [".bash", ".sh"],
+        go: [".go"],
+        rust: [".rs"],
+        java: [".java"],
+        c: [".c", ".h"],
+        cpp: [".cpp", ".hpp", ".cc", ".cxx"],
+        csharp: [".cs"],
+        php: [".php"],
+        ruby: [".rb"],
+        dockerfile: [".dockerfile", "dockerfile", ".dockerignore"],
+        xml: [".xml"]
+    };
+
+    let rawFilename = typeof body.downloadFilename === "string" ? body.downloadFilename.trim().replace(/\\/g, "/") : "";
+    if (rawFilename.includes("..") || rawFilename.includes("\0")) {
+        throw bad("Directory traversal in downloadFilename is not allowed");
+    }
+    const pathParts = rawFilename.split("/").map(p => p.trim().replace(/[\\/\0:\*\?"<>\|]/g, "-")).filter(Boolean);
+    const cleanFilename = pathParts.join("/").slice(0, 240);
+
+    const artifact = {
+        name: typeof body.name === "string" ? body.name.trim().slice(0, 120) : "",
+        description: typeof body.description === "string" ? body.description.trim().slice(0, 2000) : "",
+        variantType: typeof body.variantType === "string" ? body.variantType.trim().slice(0, 80) : "",
+        deliveryMethod: typeof body.deliveryMethod === "string" ? body.deliveryMethod.trim().slice(0, 80) : "",
+        artifactFormat: typeof body.artifactFormat === "string" ? body.artifactFormat.trim().toLowerCase() : "",
+        content: typeof body.content === "string" ? body.content : "",
+        binaryContent: typeof body.binaryContent === "string" ? body.binaryContent : "",
+        contentType: typeof body.contentType === "string" ? body.contentType.slice(0, 120) : "",
+        downloadFilename: cleanFilename,
+        reuseMethod: typeof body.reuseMethod === "string" ? body.reuseMethod.trim().slice(0, 120) : "",
+        isPrimary: body.isPrimary ? 1 : 0,
+        sortOrder: Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : 0
+    };
+    if (!artifact.name || !artifact.description || !artifact.variantType ||
+        !artifact.deliveryMethod || (typeof body.content !== "string" && !artifact.binaryContent) || !artifact.downloadFilename ||
+        !artifact.reuseMethod) {
+        throw bad("Artifact name, description, variant, delivery, content, filename, and reuse method are required");
+    }
+    if (!allowed.includes(artifact.artifactFormat)) {
+        throw bad(`Unsupported artifact format. Use one of: ${allowed.join(", ")}`);
+    }
+    if (artifact.content.length > 500000 || artifact.binaryContent.length > 700000) {
+        throw bad("Artifact content is too large", 413);
+    }
+    const basename = artifact.downloadFilename.split("/").pop() || "";
+    const extension = basename.includes(".")
+        ? (basename.startsWith(".") && !basename.slice(1).includes(".") ? basename.toLowerCase() : `.${basename.split(".").pop().toLowerCase()}`)
+        : (basename.toLowerCase() === "dockerfile" ? "dockerfile" : "");
+    if (extensions[artifact.artifactFormat] && !extensions[artifact.artifactFormat].includes(extension)) {
+        throw bad(`Filename extension must match ${artifact.artifactFormat}: ${extensions[artifact.artifactFormat].join(", ")}`);
+    }
+    if (artifact.artifactFormat === "png") {
+        if (!artifact.binaryContent) throw bad("PNG artifacts require binary content");
+        let bytes;
+        try {
+            bytes = Buffer.from(artifact.binaryContent, "base64");
+        } catch {
+            throw bad("PNG binary content is not valid base64");
+        }
+        if (bytes.length < 8 || bytes.readUInt32BE(0) !== 0x89504e47) {
+            throw bad("PNG artifacts must contain a valid PNG file");
+        }
+        artifact.content = "";
+        artifact.contentType = "image/png";
+    }
+    if (artifact.artifactFormat === "svg" && !/<svg[\s>]/i.test(artifact.content)) {
+        throw bad("SVG artifacts must contain an <svg> root element");
+    }
+    if (artifact.artifactFormat === "drawio" && !/<mxfile[\s>]/i.test(artifact.content)) {
+        throw bad("Draw.io artifacts must contain an <mxfile> root element");
+    }
+    if (artifact.artifactFormat === "json") {
+        try {
+            JSON.parse(artifact.content);
+        } catch {
+            throw bad("JSON artifacts must contain valid JSON");
+        }
+    }
+    return artifact;
 }
 
 
@@ -1479,6 +1807,266 @@ app.get(
     })
 );
 
+app.get(
+    "/api/components/:id/artifacts",
+    wrap((req, res) => {
+        getOr404(req.params.id);
+        res.json(db.prepare(`
+            SELECT id, component_id AS componentId, name, description,
+                   variant_type AS variantType, delivery_method AS deliveryMethod,
+                   artifact_format AS artifactFormat, content,
+                   binary_content AS binaryContent, content_type AS contentType,
+                   download_filename AS downloadFilename,
+                   reuse_method AS reuseMethod, is_primary AS isPrimary,
+                   sort_order AS sortOrder, created_at AS createdAt
+            FROM component_artifacts
+            WHERE component_id=?
+            ORDER BY sort_order, id
+        `).all(Number(req.params.id)).map(artifact => ({
+            ...artifact,
+            binaryContent: artifact.binaryContent ? Buffer.from(artifact.binaryContent).toString("base64") : null,
+            isPrimary: Boolean(artifact.isPrimary)
+        })));
+    })
+);
+
+app.get(
+    "/api/components/:id/zip",
+    wrap((req, res) => {
+        const component = getOr404(req.params.id);
+        const artifacts = db.prepare(`
+            SELECT id, name, artifact_format, content, binary_content, download_filename
+            FROM component_artifacts
+            WHERE component_id=?
+            ORDER BY sort_order ASC, id ASC
+        `).all(Number(req.params.id));
+
+        const files = [];
+        if (artifacts && artifacts.length > 0) {
+            for (const art of artifacts) {
+                const filename = art.download_filename || art.name || `artifact-${art.id}.txt`;
+                const content = art.binary_content || art.content || "";
+                files.push({ filename, content });
+            }
+        } else if (component.artifact_content) {
+            const extMap = {
+                javascript: "js", typescript: "ts", python: "py", json: "json", yaml: "yaml",
+                markdown: "md", mermaid: "mmd", plantuml: "puml", drawio: "drawio", svg: "svg", html: "html", css: "css", txt: "txt"
+            };
+            const ext = extMap[component.artifact_format] || "txt";
+            const filename = `${(component.name || "component").toLowerCase().replace(/[^a-z0-9._-]/g, "-")}.${ext}`;
+            files.push({ filename, content: component.artifact_content });
+        }
+
+        if (files.length === 0) {
+            throw bad("No downloadable files available for this component", 404);
+        }
+
+        const zipBuffer = createZipArchive(files);
+
+        db.prepare(`
+            UPDATE components
+            SET used_count=used_count+1,
+                queried_not_used_count=MAX(0, queried_not_used_count-1)
+            WHERE id=?
+        `).run(Number(req.params.id));
+
+        let baseName = (component.name || `component-${req.params.id}`)
+            .toLowerCase()
+            .replace(/[^a-z0-9._-]/g, "-")
+            .replace(/-+/g, "-")
+            .replace(/^-|-$/g, "");
+        if (!baseName) baseName = `component-${req.params.id}`;
+
+        res.set("Content-Type", "application/zip");
+        res.attachment(`${baseName}.zip`);
+        res.send(zipBuffer);
+    })
+);
+
+app.get(
+    "/api/components/:id/artifacts/:artifactId/download",
+    wrap((req, res) => {
+        getOr404(req.params.id);
+        const artifact = db.prepare(`
+            SELECT artifact_format, content, binary_content, content_type,
+                   download_filename
+            FROM component_artifacts
+            WHERE id=? AND component_id=?
+        `).get(Number(req.params.artifactId), Number(req.params.id));
+        if (!artifact) throw bad("Artifact not found", 404);
+        db.prepare(`
+            UPDATE components
+            SET used_count=used_count+1,
+                queried_not_used_count=MAX(0, queried_not_used_count-1)
+            WHERE id=?
+        `).run(Number(req.params.id));
+        const contentTypes = {
+            mermaid: "text/plain; charset=utf-8",
+            plantuml: "text/plain; charset=utf-8",
+            markdown: "text/markdown; charset=utf-8",
+            drawio: "application/xml; charset=utf-8",
+            svg: "image/svg+xml",
+            png: "image/png",
+            javascript: "text/javascript; charset=utf-8",
+            typescript: "text/typescript; charset=utf-8",
+            python: "text/x-python; charset=utf-8",
+            json: "application/json; charset=utf-8",
+            yaml: "text/yaml; charset=utf-8",
+            txt: "text/plain; charset=utf-8",
+            html: "text/html; charset=utf-8",
+            css: "text/css; charset=utf-8",
+            sql: "text/plain; charset=utf-8",
+            sh: "text/plain; charset=utf-8",
+            bash: "text/plain; charset=utf-8",
+            go: "text/plain; charset=utf-8",
+            rust: "text/plain; charset=utf-8",
+            java: "text/plain; charset=utf-8",
+            c: "text/plain; charset=utf-8",
+            cpp: "text/plain; charset=utf-8",
+            csharp: "text/plain; charset=utf-8",
+            php: "text/plain; charset=utf-8",
+            ruby: "text/plain; charset=utf-8",
+            xml: "application/xml; charset=utf-8"
+        };
+        res.attachment(artifact.download_filename);
+        res.set("Content-Type", contentTypes[artifact.artifact_format] || artifact.content_type || "application/octet-stream");
+        res.send(artifact.binary_content || artifact.content);
+    })
+);
+
+app.post(
+    "/api/components/:id/artifacts",
+    allow("cataloguer"),
+    wrap((req, res) => {
+        const componentId = Number(req.params.id);
+        getOr404(componentId);
+        const artifact = parseArtifact(req.body);
+        const values = [artifact.name, artifact.description, artifact.variantType, artifact.deliveryMethod,
+            artifact.artifactFormat, artifact.content, artifact.downloadFilename, artifact.reuseMethod];
+        const result = db.prepare(`
+            INSERT INTO component_artifacts(
+                component_id, name, description, variant_type, delivery_method,
+                artifact_format, content, binary_content, content_type,
+                download_filename, reuse_method, is_primary, sort_order
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `).run(componentId, ...values.slice(0, 5), artifact.content, artifact.binaryContent ? Buffer.from(artifact.binaryContent, "base64") : null,
+            artifact.contentType || "text/plain", ...values.slice(6), artifact.isPrimary, artifact.sortOrder);
+        const created = db.prepare(`
+            SELECT id, component_id AS componentId, name, description,
+                   variant_type AS variantType, delivery_method AS deliveryMethod,
+                   artifact_format AS artifactFormat, content,
+                   binary_content AS binaryContent, content_type AS contentType,
+                   download_filename AS downloadFilename,
+                   reuse_method AS reuseMethod, is_primary AS isPrimary,
+                   sort_order AS sortOrder, created_at AS createdAt
+            FROM component_artifacts WHERE id=?
+        `).get(result.lastInsertRowid);
+        if (created.binaryContent) created.binaryContent = Buffer.from(created.binaryContent).toString("base64");
+        res.status(201).json(created);
+    })
+);
+
+app.put(
+    "/api/components/:id/artifacts/reorder",
+    allow("cataloguer"),
+    wrap((req, res) => {
+        const componentId = Number(req.params.id);
+        getOr404(componentId);
+        const order = Array.isArray(req.body.order)
+            ? req.body.order
+            : Array.isArray(req.body.artifacts)
+                ? req.body.artifacts.map(a => a.id)
+                : null;
+
+        if (!order || !Array.isArray(order)) {
+            throw bad("Order array of artifact IDs is required");
+        }
+
+        const updateStmt = db.prepare(`
+            UPDATE component_artifacts
+            SET sort_order=?
+            WHERE id=? AND component_id=?
+        `);
+
+        db.transaction(() => {
+            order.forEach((artId, idx) => {
+                updateStmt.run(idx, Number(artId), componentId);
+            });
+        })();
+
+        const updated = db.prepare(`
+            SELECT id, component_id AS componentId, name, description,
+                   variant_type AS variantType, delivery_method AS deliveryMethod,
+                   artifact_format AS artifactFormat, content,
+                   binary_content AS binaryContent, content_type AS contentType,
+                   download_filename AS downloadFilename,
+                   reuse_method AS reuseMethod, is_primary AS isPrimary,
+                   sort_order AS sortOrder, created_at AS createdAt
+            FROM component_artifacts
+            WHERE component_id=?
+            ORDER BY sort_order, id
+        `).all(componentId).map(artifact => ({
+            ...artifact,
+            binaryContent: artifact.binaryContent ? Buffer.from(artifact.binaryContent).toString("base64") : null,
+            isPrimary: Boolean(artifact.isPrimary)
+        }));
+
+        res.json(updated);
+    })
+);
+
+app.put(
+    "/api/components/:id/artifacts/:artifactId",
+    allow("cataloguer"),
+    wrap((req, res) => {
+        const componentId = Number(req.params.id);
+        const artifactId = Number(req.params.artifactId);
+        getOr404(componentId);
+        const artifact = parseArtifact(req.body);
+        const values = [artifact.name, artifact.description, artifact.variantType, artifact.deliveryMethod,
+            artifact.artifactFormat, artifact.content, artifact.downloadFilename, artifact.reuseMethod];
+        const result = db.prepare(`
+            UPDATE component_artifacts
+            SET name=?, description=?, variant_type=?, delivery_method=?,
+                artifact_format=?, content=?, binary_content=?, content_type=?, download_filename=?,
+                reuse_method=?, is_primary=?, sort_order=?
+            WHERE id=? AND component_id=?
+        `).run(artifact.name, artifact.description, artifact.variantType, artifact.deliveryMethod,
+            artifact.artifactFormat, artifact.content,
+            artifact.binaryContent ? Buffer.from(artifact.binaryContent, "base64") : null,
+            artifact.contentType || null, artifact.downloadFilename, artifact.reuseMethod,
+            artifact.isPrimary, artifact.sortOrder, artifactId, componentId);
+        if (!result.changes) throw bad("Artifact not found", 404);
+        const updated = db.prepare(`
+            SELECT id, component_id AS componentId, name, description,
+                   variant_type AS variantType, delivery_method AS deliveryMethod,
+                   artifact_format AS artifactFormat, content,
+                   binary_content AS binaryContent, content_type AS contentType,
+                   download_filename AS downloadFilename,
+                   reuse_method AS reuseMethod, is_primary AS isPrimary,
+                   sort_order AS sortOrder, created_at AS createdAt
+            FROM component_artifacts WHERE id=?
+        `).get(artifactId);
+        if (updated.binaryContent) updated.binaryContent = Buffer.from(updated.binaryContent).toString("base64");
+        res.json(updated);
+    })
+);
+
+app.delete(
+    "/api/components/:id/artifacts/:artifactId",
+    allow("cataloguer"),
+    wrap((req, res) => {
+        getOr404(req.params.id);
+        const result = db.prepare(`
+            DELETE FROM component_artifacts
+            WHERE id=? AND component_id=?
+        `).run(Number(req.params.artifactId), Number(req.params.id));
+        if (!result.changes) throw bad("Artifact not found", 404);
+        res.status(204).end();
+    })
+);
+
 
 app.post(
     "/api/components",
@@ -1510,9 +2098,16 @@ app.post(
                             type,
                             tech,
                             url,
+                            artifact_format,
+                            artifact_content,
+                            usage_notes,
+                            example_content,
+                            delivery_method,
+                            reuse_method,
+                            install_command,
                             created_by
                         )
-                        VALUES(?,?,?,?,?,?,?)
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     `).run(
                         component.name,
                         component.description,
@@ -1520,6 +2115,13 @@ app.post(
                         component.type,
                         component.tech,
                         component.url,
+                        component.artifactFormat,
+                        component.artifactContent,
+                        component.usageNotes,
+                        component.exampleContent,
+                        component.deliveryMethod,
+                        component.reuseMethod,
+                        component.installCommand,
                         req.user.id
                     );
 
@@ -1583,7 +2185,14 @@ app.put(
                     category_id=?,
                     type=?,
                     tech=?,
-                    url=?
+                    url=?,
+                    artifact_format=?,
+                    artifact_content=?,
+                    usage_notes=?,
+                    example_content=?,
+                    delivery_method=?,
+                    reuse_method=?,
+                    install_command=?
                 WHERE id=?
             `).run(
                 component.name,
@@ -1592,6 +2201,13 @@ app.put(
                 component.type,
                 component.tech,
                 component.url,
+                component.artifactFormat,
+                component.artifactContent,
+                component.usageNotes,
+                component.exampleContent,
+                component.deliveryMethod,
+                component.reuseMethod,
+                component.installCommand,
                 componentId
             );
 
@@ -1711,35 +2327,41 @@ app.get(
 
         db.transaction(() => {
 
-            const update =
+            const recentQuery = db.prepare(`
+                SELECT id FROM query_log
+                WHERE user_id = ? AND q = ? AND at >= datetime('now', '-5 seconds')
+                ORDER BY id DESC LIMIT 1
+            `).get(req.user.id, query.slice(0, 200));
+
+            if (!recentQuery) {
+                const update =
+                    db.prepare(`
+                        UPDATE components
+                        SET queried_not_used_count =
+                            queried_not_used_count + 1
+                        WHERE id=?
+                    `);
+
+                results.forEach(
+                    result =>
+                        update.run(
+                            result.id
+                        )
+                );
+
                 db.prepare(`
-                    UPDATE components
-                    SET queried_not_used_count =
-                        queried_not_used_count + 1
-                    WHERE id=?
-                `);
-
-
-            results.forEach(
-                result =>
-                    update.run(
-                        result.id
+                    INSERT INTO query_log(
+                        user_id,
+                        q,
+                        result_count
                     )
-            );
-
-
-            db.prepare(`
-                INSERT INTO query_log(
-                    user_id,
-                    q,
-                    result_count
-                )
-                VALUES(?,?,?)
-            `).run(
-                req.user.id,
-                query.slice(0, 200),
-                results.length
-            );
+                    VALUES(?,?,?)
+                `).run(
+                    req.user.id,
+                    query.slice(0, 200),
+                    results.length
+                );
+            }
 
         })();
 

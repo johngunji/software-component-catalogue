@@ -1,7 +1,10 @@
 /* Sign-in page. */
 const $ = (selector) => document.querySelector(selector);
+// Return the icon markup used by the sign-in page.
 const icon = (name) => `<i data-lucide="${name}"></i>`;
+// Replace icon placeholders with rendered Lucide icons.
 const renderIcons = () => window.lucide && lucide.createIcons();
+// Allow only safe internal redirect targets after sign-in.
 const safeNext = (value) =>
   /^(index\.html|pages\/[a-z-]+\.html)(\?[\w=&%.\-]*)?$/.test(value || "")
     ? value
@@ -41,6 +44,7 @@ if (Catalogue.isLoggedIn()) {
     </div>`;
   renderIcons();
 
+  // Toggle visibility of the password field.
   $("#eye").onclick = () => {
     const input = $("#p");
     const show = input.type === "password";
@@ -53,6 +57,7 @@ if (Catalogue.isLoggedIn()) {
     renderIcons();
   };
 
+  // Validate credentials, authenticate, and redirect the user.
   $("#lf").onsubmit = async (event) => {
     event.preventDefault();
     const username = $("#u").value.trim();

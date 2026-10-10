@@ -10,6 +10,12 @@ Components are stored in hierarchical categories and can be found by name,
 description, technology, category, or keywords. The catalogue records both
 successful reuse and search results that were not subsequently used.
 
+Design components can contain multiple reusable variants and artifacts. Text
+artifacts such as Mermaid, PlantUML, Markdown, and Draw.io XML are stored in
+SQLite and can be copied or downloaded directly. Each artifact has its own
+format, filename, delivery method, and reuse guidance; downloading an artifact
+records one component reuse event.
+
 ## Roles
 
 The application has two roles:
@@ -197,6 +203,11 @@ bearer token returned by the login endpoint.
 | `PUT` | `/api/components/:id/keywords` | Cataloguer | Replace only the component keywords |
 | `DELETE` | `/api/components/:id` | Cataloguer | Delete a component |
 | `POST` | `/api/components/:id/use` | Signed-in users | Record reuse of a component |
+| `GET` | `/api/components/:id/artifacts` | Signed-in users | List reusable variants and artifacts |
+| `GET` | `/api/components/:id/artifacts/:artifactId/download` | Signed-in users | Download an artifact and record reuse |
+| `POST` | `/api/components/:id/artifacts` | Cataloguer | Add an artifact |
+| `PUT` | `/api/components/:id/artifacts/:artifactId` | Cataloguer | Edit an artifact |
+| `DELETE` | `/api/components/:id/artifacts/:artifactId` | Cataloguer | Delete an artifact |
 
 ### Search and statistics
 

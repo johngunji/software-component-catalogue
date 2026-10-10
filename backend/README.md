@@ -39,7 +39,9 @@ delivery.
 
 Catalogue endpoints below the authentication middleware require a valid JWT.
 Backend role checks, rather than frontend visibility, enforce
-cataloguer-only operations.http
+cataloguer-only operations.
+
+```http
 PUT /api/components/:id
 Authorization: Bearer <cataloguer-token>
 Content-Type: application/json
