@@ -1,6 +1,8 @@
 /* Password reset and email verification page. */
 const $ = (selector) => document.querySelector(selector);
+// Return icon markup for the password recovery page.
 const icon = (name) => `<i data-lucide="${name}"></i>`;
+// Render all Lucide icon placeholders on the page.
 const renderIcons = () => window.lucide && lucide.createIcons();
 const apiBase =
   localStorage.getItem("componentHub.apiBase") ||
@@ -46,6 +48,7 @@ document.body.innerHTML = `
   </div>`;
 renderIcons();
 
+// Toggle visibility for a password input and update its accessible label.
 const togglePassword = (inputId, buttonId) => {
   const input = $(`#${inputId}`);
   const button = $(`#${buttonId}`);
@@ -61,12 +64,14 @@ const togglePassword = (inputId, buttonId) => {
 togglePassword("password", "passwordEye");
 togglePassword("confirmPassword", "confirmEye");
 
+// Display a validation or API error beside the recovery form.
 const showError = (message) => {
   $("#resetSuccess").hidden = true;
   $("#resetError").textContent = message;
   $("#resetError").hidden = false;
 };
 
+// Send a JSON request to the password recovery API.
 const api = async (path, body) => {
   const response = await fetch(`${apiBase}${path}`, {
     method: "POST",

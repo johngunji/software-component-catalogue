@@ -1,6 +1,8 @@
 /* Account creation and email verification page. */
 const $ = (selector) => document.querySelector(selector);
+// Return icon markup for the account creation page.
 const icon = (name) => `<i data-lucide="${name}"></i>`;
+// Render all Lucide icon placeholders on the page.
 const renderIcons = () => window.lucide && lucide.createIcons();
 const apiBase =
   localStorage.getItem("componentHub.apiBase") ||
@@ -47,6 +49,7 @@ document.body.innerHTML = `
   </div>`;
 renderIcons();
 
+// Toggle visibility for a password input and update its accessible label.
 const togglePassword = (inputId, buttonId) => {
   const input = $(`#${inputId}`);
   const button = $(`#${buttonId}`);
@@ -62,12 +65,14 @@ const togglePassword = (inputId, buttonId) => {
 togglePassword("password", "passwordEye");
 togglePassword("confirmPassword", "confirmEye");
 
+// Display a validation or API error beside the signup form.
 const showError = (message) => {
   $("#signupSuccess").hidden = true;
   $("#signupError").textContent = message;
   $("#signupError").hidden = false;
 };
 
+// Send a JSON request to the account API and surface failures.
 const api = async (path, body) => {
   const response = await fetch(`${apiBase}${path}`, {
     method: "POST",

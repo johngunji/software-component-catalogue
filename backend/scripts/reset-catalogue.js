@@ -31,6 +31,7 @@ try {
 
         db.prepare("DELETE FROM query_log").run();
         db.prepare("DELETE FROM component_keywords").run();
+        db.prepare("DELETE FROM component_artifacts").run();
         db.prepare("DELETE FROM components").run();
         db.prepare("DELETE FROM keywords").run();
         const findLeaf = db.prepare(`
