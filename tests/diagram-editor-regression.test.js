@@ -360,5 +360,132 @@ describe('Shared ErdEditor Detection & Save Path Contract Regression', () => {
     assert.equal(typeof sourceCode, 'string');
     assert.ok(sourceCode.length > 0);
   });
+
+  test('ErdEditor.open initializes safely in Source Mode without null query errors and collapses inspector', async () => {
+    class MockElement {
+      constructor(tag = 'div') {
+        this.tagName = tag.toUpperCase();
+        this.classList = {
+          _classes: new Set(),
+          add(c) { this._classes.add(c); },
+          remove(c) { this._classes.delete(c); },
+          toggle(c, force) {
+            if (force === undefined) {
+              if (this._classes.has(c)) { this._classes.delete(c); return false; }
+              else { this._classes.add(c); return true; }
+            }
+            if (force) this._classes.add(c); else this._classes.delete(c);
+            return force;
+          },
+          contains(c) { return this._classes.has(c); }
+        };
+        this.style = {};
+        this.children = [];
+        this.hidden = false;
+        this.value = '';
+        this._innerHTML = '';
+      }
+      get innerHTML() { return this._innerHTML; }
+      set innerHTML(html) {
+        this._innerHTML = html;
+        this.children = [];
+        const tagRegex = /<([a-z0-9\-]+)([^>]*)>/gi;
+        let m;
+        while ((m = tagRegex.exec(html)) !== null) {
+          const child = new MockElement(m[1]);
+          const attrs = m[2];
+          const idMatch = attrs.match(/id="([^"]+)"/);
+          if (idMatch) child.id = idMatch[1];
+          const classMatch = attrs.match(/class="([^"]+)"/);
+          if (classMatch) {
+            classMatch[1].split(/\s+/).filter(Boolean).forEach(c => child.classList.add(c));
+          }
+          this.children.push(child);
+        }
+      }
+      querySelector(sel) {
+        if (sel.startsWith('#')) {
+          const id = sel.slice(1);
+          return this.children.find(c => c.id === id) || null;
+        }
+        if (sel.startsWith('.')) {
+          const cl = sel.slice(1);
+          return this.children.find(c => c.classList.contains(cl)) || null;
+        }
+        return null;
+      }
+      querySelectorAll(sel) {
+        if (sel.startsWith('.')) {
+          const cl = sel.slice(1);
+          return this.children.filter(c => c.classList.contains(cl));
+        }
+        return [];
+      }
+      appendChild(c) { this.children.push(c); }
+      remove() {}
+    }
+
+    const prevDoc = global.document;
+    const prevWin = global.window;
+    let appendedModal = null;
+
+    global.document = {
+      body: {
+        appendChild(el) { appendedModal = el; }
+      },
+      createElement(tag) { return new MockElement(tag); },
+      addEventListener() {}
+    };
+    global.window = {
+      addEventListener() {},
+      removeEventListener() {}
+    };
+
+    try {
+      const seed = 'import numpy as np\nprint("test")';
+      let saved = false;
+
+      ErdEditor.open({
+        initialMermaid: seed,
+        title: 'OpenCV — example.py',
+        activeArtifact: {
+          artifactFormat: 'py',
+          downloadFilename: 'example.py',
+          deliveryMethod: 'Package',
+          content: seed
+        },
+        onSave: async () => { saved = true; }
+      });
+
+      assert.ok(appendedModal, 'Modal should be appended to document.body');
+
+      // Inspector pane must have 'collapsed' class in source mode
+      const inspector = appendedModal.querySelector('#drawio-inspector-pane');
+      assert.ok(inspector, 'Inspector pane element should exist in modal');
+      assert.ok(inspector.classList.contains('collapsed'), 'Inspector pane must be collapsed by default in source mode');
+
+      // Code box must be initialized with seed content
+      const codeBox = appendedModal.querySelector('#erd-code-box');
+      assert.ok(codeBox, 'Code box textarea must exist');
+      assert.equal(codeBox.value, seed, 'Code box value should match seed code');
+
+      // Verify toggle button works on inspector
+      const toggleInspector = appendedModal.querySelector('#ribbon-toggle-inspector');
+      assert.ok(toggleInspector, 'Toggle inspector button must exist');
+      toggleInspector.onclick();
+      assert.equal(inspector.classList.contains('collapsed'), false, 'Inspector should be uncollapsed after clicking File Details');
+      toggleInspector.onclick();
+      assert.equal(inspector.classList.contains('collapsed'), true, 'Inspector should toggle back to collapsed');
+
+      // Verify apply button calls onSave
+      const applyBtn = appendedModal.querySelector('#drawio-apply-btn');
+      assert.ok(applyBtn, 'Apply button must exist');
+      await applyBtn.onclick();
+      assert.equal(saved, true, 'Apply button should invoke onSave');
+    } finally {
+      global.document = prevDoc;
+      global.window = prevWin;
+    }
+  });
 });
 

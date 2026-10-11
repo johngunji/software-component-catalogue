@@ -22,6 +22,107 @@ const ErdEditor = (() => {
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   /**
+   * Code Syntax Highlighter and Tokenizer
+   * Produces VS Code Light tokens for source and diagram previews.
+   */
+  const highlightCodeTokens = (content, format) => {
+    if (!content) return [];
+    const lines = String(content).split(/\r?\n/);
+    const fmt = String(format || "").toLowerCase();
+    const isPython = ["py", "python"].includes(fmt);
+    let inDocstring = false;
+    let docstringDelimiter = "";
+
+    return lines.map(lineStr => {
+      // 1. Python multi-line triple-quoted docstring tracking
+      if (isPython) {
+        const trimmed = lineStr.trim();
+        if (!inDocstring) {
+          if (/^("""|''')/.test(trimmed)) {
+            const delim = trimmed.slice(0, 3);
+            const rest = trimmed.slice(3);
+            if (rest.includes(delim)) {
+              return `<span class="token-com">${esc(lineStr)}</span>`;
+            } else {
+              inDocstring = true;
+              docstringDelimiter = delim;
+              return `<span class="token-com">${esc(lineStr)}</span>`;
+            }
+          }
+        } else {
+          const finished = lineStr.includes(docstringDelimiter);
+          if (finished) {
+            inDocstring = false;
+            docstringDelimiter = "";
+          }
+          return `<span class="token-com">${esc(lineStr)}</span>`;
+        }
+      }
+
+      const escaped = esc(lineStr);
+      if (["txt", "text"].includes(fmt)) {
+        return escaped;
+      }
+
+      // Full-line comments & comment blocks (//, #, --, /*, *, %%)
+      if (/^\s*(\/\/|#|--|\/\*|\*|%%)/.test(lineStr)) {
+        return `<span class="token-com">${escaped}</span>`;
+      }
+
+      let text = escaped;
+      const tokens = [];
+      const putToken = (cls, content) => {
+        const i = tokens.length;
+        tokens.push(`<span class="${cls}">${content}</span>`);
+        return String.fromCharCode(0xE000 + i);
+      };
+
+      // 1. Strings: match &quot;...&quot;, &#39;...&#39;, `...`
+      text = text.replace(/(&quot;|&#39;|[`])(?:(?=(\\?))\2.)*?\1/g, match => putToken("token-str", match));
+
+      // 2. Trailing comments
+      text = text.replace(/(\s*(?:\/\/|#|--|%%)\s*.*)$/, match => putToken("token-com", match));
+
+      // 3. Python decorators: @app.route
+      if (isPython) {
+        text = text.replace(/(@[a-zA-Z_][a-zA-Z0-9_.]*)/g, match => putToken("token-dec", match));
+      }
+
+      // 4. Function & Class definitions: def fnName, class ClassName
+      if (isPython) {
+        text = text.replace(/\b(def)\s+([a-zA-Z_]\w*)/g, (match, defKw, fnName) => {
+          return putToken("token-kw", defKw) + " " + putToken("token-fn", fnName);
+        });
+        text = text.replace(/\b(class)\s+([a-zA-Z_]\w*)/g, (match, clsKw, clsName) => {
+          return putToken("token-kw", clsKw) + " " + putToken("token-typ", clsName);
+        });
+      }
+
+      // 5. Keywords
+      const kwRegex = /\b(const|let|var|function|return|import|export|from|as|default|class|extends|implements|interface|type|enum|public|private|protected|async|await|try|catch|finally|throw|new|typeof|instanceof|if|else|switch|case|break|continue|for|while|do|in|of|def|self|None|True|False|elif|lambda|with|yield|pass|struct|fn|pub|impl|mut|match|trait|where|select|insert|into|values|update|set|delete|create|table|drop|alter|null|true|false)\b/g;
+      text = text.replace(kwRegex, match => putToken("token-kw", match));
+
+      // 6. Common built-in objects & globals
+      const builtinRegex = /\b(console|process|module|require|Math|JSON|Promise|Flask|jsonify|request|document|window|self|print|len|range|int|str|float|list|dict|set|tuple|bool|type|open)\b/g;
+      text = text.replace(builtinRegex, match => putToken("token-typ", match));
+
+      // 7. Function calls: identifier followed by (
+      text = text.replace(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)(?=\s*\()/g, match => putToken("token-fn", match));
+
+      // 8. Numbers
+      text = text.replace(/\b(\d+(?:\.\d+)?)\b/g, match => putToken("token-num", match));
+
+      // Restore tokens in reverse order
+      for (let i = tokens.length - 1; i >= 0; i--) {
+        text = text.replace(String.fromCharCode(0xE000 + i), tokens[i]);
+      }
+
+      return text;
+    });
+  };
+
+
+  /**
    * Diagram Family Detection
    */
   const detectDiagramType = (content = "", compName = "", tech = "", notation = "", artifactFormat = "") => {
@@ -1343,8 +1444,8 @@ const ErdEditor = (() => {
             </div>
             <div class="drawio-title-block">
               <span class="drawio-diagram-title">${esc(title)}</span>
-              <span class="drawio-dirty-badge ${isDirty ? 'dirty' : 'clean'}" id="drawio-dirty-indicator">
-                ${isDirty ? '● Unsaved changes' : '✓ Saved'}
+              <span class="drawio-dirty-badge ${isDirty ? 'dirty' : (activeArtifact && activeArtifact.id ? 'clean' : 'template')}" id="drawio-dirty-indicator">
+                ${isDirty ? '● Unsaved changes' : (activeArtifact && activeArtifact.id ? '✓ Saved' : '⚡ Starter template')}
               </span>
             </div>
           </div>
@@ -1465,11 +1566,17 @@ const ErdEditor = (() => {
                 <button class="drawio-btn sm" id="erd-copy-code-btn">📋 Copy Code</button>
               </div>
             </div>
-            <textarea class="drawio-code-textarea" id="erd-code-box" spellcheck="false" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.6;padding:16px;"></textarea>
+            <div class="drawio-code-editor-container" id="erd-code-editor-container">
+              <div class="drawio-code-gutter" id="erd-code-gutter">1</div>
+              <div class="drawio-code-wrapper" id="erd-code-wrapper">
+                <pre class="drawio-code-highlight-layer" id="erd-code-highlight-layer" aria-hidden="true"><code id="erd-code-highlight-code"></code></pre>
+                <textarea class="drawio-code-textarea" id="erd-code-box" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+              </div>
+            </div>
           </div>
 
           <!-- Right Sidebar: Draw.io Format & Inspector Panel -->
-          <aside class="drawio-sidebar-inspector" id="drawio-inspector-pane">
+          <aside class="drawio-sidebar-inspector ${isSourceType ? 'collapsed' : ''}" id="drawio-inspector-pane">
             <!-- Format Panel Tabs -->
             <div class="drawio-inspector-tabs" ${isSourceType ? 'style="display:none;"' : ''}>
               <button class="drawio-insp-tab on" data-insp-tab="properties">🎨 Style & Data</button>
@@ -1507,12 +1614,27 @@ const ErdEditor = (() => {
     const codePane = modal.querySelector("#erd-code-pane");
     const canvasPane = modal.querySelector("#drawio-canvas-pane");
     const codeBox = modal.querySelector("#erd-code-box");
+    const highlightLayer = modal.querySelector("#erd-code-highlight-layer");
+    const highlightCode = modal.querySelector("#erd-code-highlight-code");
+    const codeWrapper = modal.querySelector("#erd-code-wrapper");
     const codeLangLabel = modal.querySelector("#erd-code-lang-label");
     const dirtyIndicator = modal.querySelector("#drawio-dirty-indicator");
     const undoBtn = modal.querySelector("#drawio-undo-btn");
     const redoBtn = modal.querySelector("#drawio-redo-btn");
     const statusItems = modal.querySelector("#drawio-status-items");
     const statusSelected = modal.querySelector("#drawio-status-selected");
+
+    const setDirtyState = (dirty) => {
+      isDirty = Boolean(dirty);
+      if (isDirty) {
+        dirtyIndicator.className = "drawio-dirty-badge dirty";
+        dirtyIndicator.textContent = "● Unsaved changes";
+      } else {
+        const isPersisted = Boolean(activeArtifact && activeArtifact.id);
+        dirtyIndicator.className = isPersisted ? "drawio-dirty-badge clean" : "drawio-dirty-badge template";
+        dirtyIndicator.textContent = isPersisted ? "✓ Saved" : "⚡ Starter template";
+      }
+    };
 
     // History Stack for Undo / Redo
     const pushState = () => {
@@ -1521,9 +1643,7 @@ const ErdEditor = (() => {
       }
       historyStack.push(JSON.parse(JSON.stringify(model)));
       historyIdx = historyStack.length - 1;
-      isDirty = true;
-      dirtyIndicator.className = "drawio-dirty-badge dirty";
-      dirtyIndicator.textContent = "● Unsaved changes";
+      setDirtyState(true);
       undoBtn.disabled = historyIdx <= 0;
       redoBtn.disabled = historyIdx >= historyStack.length - 1;
     };
@@ -1548,19 +1668,67 @@ const ErdEditor = (() => {
       }
     };
 
-    undoBtn.onclick = handleUndo;
-    redoBtn.onclick = handleRedo;
+    // Source Mode History Stack for Undo / Redo
+    const sourceHistory = [originalSeedCode];
+    let sourceHistoryIdx = 0;
+
+    const pushSourceState = () => {
+      if (sourceHistoryIdx < sourceHistory.length - 1) {
+        sourceHistory.splice(sourceHistoryIdx + 1);
+      }
+      sourceHistory.push(codeBox.value);
+      sourceHistoryIdx = sourceHistory.length - 1;
+      undoBtn.disabled = sourceHistoryIdx <= 0;
+      redoBtn.disabled = sourceHistoryIdx >= sourceHistory.length - 1;
+    };
+
+    const handleSourceUndo = () => {
+      if (sourceHistoryIdx > 0) {
+        sourceHistoryIdx--;
+        codeBox.value = sourceHistory[sourceHistoryIdx];
+        setDirtyState(codeBox.value !== originalSeedCode);
+        undoBtn.disabled = sourceHistoryIdx <= 0;
+        redoBtn.disabled = sourceHistoryIdx >= sourceHistory.length - 1;
+        if (typeof updateSourceStats === "function") updateSourceStats();
+      }
+    };
+
+    const handleSourceRedo = () => {
+      if (sourceHistoryIdx < sourceHistory.length - 1) {
+        sourceHistoryIdx++;
+        codeBox.value = sourceHistory[sourceHistoryIdx];
+        setDirtyState(codeBox.value !== originalSeedCode);
+        undoBtn.disabled = sourceHistoryIdx <= 0;
+        redoBtn.disabled = sourceHistoryIdx >= sourceHistory.length - 1;
+        if (typeof updateSourceStats === "function") updateSourceStats();
+      }
+    };
+
+    undoBtn.onclick = () => {
+      if (isSourceType) handleSourceUndo();
+      else handleUndo();
+    };
+    redoBtn.onclick = () => {
+      if (isSourceType) handleSourceRedo();
+      else handleRedo();
+    };
 
     const onKeyDown = e => {
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
-        e.preventDefault();
-        handleUndo();
+        if (!isSourceType) {
+          e.preventDefault();
+          handleUndo();
+        }
       } else if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) {
-        e.preventDefault();
-        handleRedo();
+        if (!isSourceType) {
+          e.preventDefault();
+          handleRedo();
+        }
       }
     };
-    window.addEventListener("keydown", onKeyDown);
+    if (typeof window !== "undefined" && window.addEventListener) {
+      window.addEventListener("keydown", onKeyDown);
+    }
 
     // Zoom & Transform
     const updateTransform = () => {
@@ -2439,46 +2607,62 @@ const ErdEditor = (() => {
     };
 
     // Zoom Toolbar buttons
-    modal.querySelector("#drawio-zoom-in").onclick = () => setZoom(zoom * 1.2);
-    modal.querySelector("#drawio-zoom-out").onclick = () => setZoom(zoom / 1.2);
-    modal.querySelector("#drawio-zoom-fit").onclick = fitToView;
-    modal.querySelector("#drawio-zoom-reset").onclick = resetZoom;
+    const zoomInBtn = modal.querySelector("#drawio-zoom-in");
+    if (zoomInBtn) zoomInBtn.onclick = () => setZoom(zoom * 1.2);
+    const zoomOutBtn = modal.querySelector("#drawio-zoom-out");
+    if (zoomOutBtn) zoomOutBtn.onclick = () => setZoom(zoom / 1.2);
+    const zoomFitBtn = modal.querySelector("#drawio-zoom-fit");
+    if (zoomFitBtn) zoomFitBtn.onclick = fitToView;
+    const zoomResetBtn = modal.querySelector("#drawio-zoom-reset");
+    if (zoomResetBtn) zoomResetBtn.onclick = resetZoom;
 
     // Toggle Left Shapes Palette
-    modal.querySelector("#ribbon-toggle-shapes").onclick = () => {
-      shapesPalette.classList.toggle("collapsed");
-    };
+    const toggleShapesBtn = modal.querySelector("#ribbon-toggle-shapes");
+    if (toggleShapesBtn) {
+      toggleShapesBtn.onclick = () => {
+        shapesPalette.classList.toggle("collapsed");
+      };
+    }
 
     // Toggle Right Inspector Panel
-    modal.querySelector("#ribbon-toggle-inspector").onclick = () => {
-      inspectorPane.classList.toggle("collapsed");
-    };
+    const toggleInspectorBtn = modal.querySelector("#ribbon-toggle-inspector");
+    if (toggleInspectorBtn) {
+      toggleInspectorBtn.onclick = () => {
+        inspectorPane.classList.toggle("collapsed");
+      };
+    }
 
     // Ribbon Connect Tool
-    modal.querySelector("#ribbon-add-conn").onclick = () => {
-      const itemsCount = (model.entities?.length || 0) + (model.elements?.length || 0) + (model.classes?.length || 0);
-      if (itemsCount < 2) {
-        alert("At least 2 elements are required to create a connection.");
-        return;
-      }
-      isCreatingConnection = true;
-      connDraft = { from: null, to: null, label: "connects", cardinality: "||--o{", type: "association" };
-      selectedType = model.type === "erd" ? "creating_relationship" : (model.type === "class" ? "creating_class_rel" : "creating_flow");
-      renderCanvas();
-    };
+    const ribbonAddConnBtn = modal.querySelector("#ribbon-add-conn");
+    if (ribbonAddConnBtn) {
+      ribbonAddConnBtn.onclick = () => {
+        const itemsCount = (model.entities?.length || 0) + (model.elements?.length || 0) + (model.classes?.length || 0);
+        if (itemsCount < 2) {
+          alert("At least 2 elements are required to create a connection.");
+          return;
+        }
+        isCreatingConnection = true;
+        connDraft = { from: null, to: null, label: "connects", cardinality: "||--o{", type: "association" };
+        selectedType = model.type === "erd" ? "creating_relationship" : (model.type === "class" ? "creating_class_rel" : "creating_flow");
+        renderCanvas();
+      };
+    }
 
     // Ribbon Auto-layout
-    modal.querySelector("#ribbon-autolayout").onclick = () => {
-      const items = model.entities || model.elements || model.classes || [];
-      const cols = Math.min(3, Math.ceil(Math.sqrt(items.length)));
-      items.forEach((it, idx) => {
-        it.x = 60 + (idx % cols) * 260;
-        it.y = 60 + Math.floor(idx / cols) * 200;
-      });
-      pushState();
-      renderCanvas();
-      fitToView();
-    };
+    const ribbonAutolayoutBtn = modal.querySelector("#ribbon-autolayout");
+    if (ribbonAutolayoutBtn) {
+      ribbonAutolayoutBtn.onclick = () => {
+        const items = model.entities || model.elements || model.classes || [];
+        const cols = Math.min(3, Math.ceil(Math.sqrt(items.length)));
+        items.forEach((it, idx) => {
+          it.x = 60 + (idx % cols) * 260;
+          it.y = 60 + Math.floor(idx / cols) * 200;
+        });
+        pushState();
+        renderCanvas();
+        fitToView();
+      };
+    }
 
     // Inspector Tab Switching
     modal.querySelectorAll(".drawio-insp-tab").forEach(tab => {
@@ -2519,6 +2703,7 @@ const ErdEditor = (() => {
             codeLangLabel.textContent = "Scalable Vector Graphics (SVG)";
             codeBox.value = generateSvg(model);
           }
+          updateSourceStats();
         }
       };
     });
@@ -2539,21 +2724,43 @@ const ErdEditor = (() => {
       };
     }
 
-    modal.querySelector("#erd-copy-code-btn").onclick = async () => {
-      try {
-        await navigator.clipboard.writeText(codeBox.value);
-        const b = modal.querySelector("#erd-copy-code-btn");
-        const orig = b.textContent;
-        b.textContent = "Copied!";
-        setTimeout(() => { b.textContent = orig; }, 1500);
-      } catch {
-        codeBox.select();
-      }
-    };
+    const copyCodeBtn = modal.querySelector("#erd-copy-code-btn");
+    if (copyCodeBtn) {
+      copyCodeBtn.onclick = async () => {
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(codeBox.value);
+          } else {
+            codeBox.select();
+            document.execCommand("copy");
+          }
+          const orig = copyCodeBtn.textContent;
+          copyCodeBtn.textContent = "✓ Copied!";
+          setTimeout(() => { copyCodeBtn.textContent = orig; }, 1500);
+        } catch {
+          codeBox.select();
+          const orig = copyCodeBtn.textContent;
+          copyCodeBtn.textContent = "✓ Selected";
+          setTimeout(() => { copyCodeBtn.textContent = orig; }, 1500);
+        }
+      };
+    }
 
     // Source Mode Ribbon Handlers & Stats
+    const updateHighlight = () => {
+      if (!highlightCode || !codeBox) return;
+      const code = codeBox.value || "";
+      const fmt = (isSourceType
+        ? (activeArtifact?.artifactFormat || (activeArtifact?.downloadFilename || title || "").split(".").pop() || "source")
+        : (activeTab === "mermaid" ? "mermaid" : (activeTab === "drawio" || activeTab === "svg" ? "xml" : "txt"))
+      ).toLowerCase();
+      const lines = highlightCodeTokens(code, fmt);
+      const trailing = code.endsWith("\n") ? "\n" : "";
+      highlightCode.innerHTML = lines.join("\n") + trailing;
+    };
+
     const updateSourceStats = () => {
-      const val = codeBox.value;
+      const val = codeBox.value || "";
       const lines = val.split("\n").length;
       const chars = val.length;
       const statsEl = modal.querySelector("#src-stats");
@@ -2562,16 +2769,33 @@ const ErdEditor = (() => {
       if (lineCountEl) lineCountEl.textContent = String(lines);
       const charCountEl = modal.querySelector("#src-char-count");
       if (charCountEl) charCountEl.textContent = String(chars);
+      const gutter = modal.querySelector("#erd-code-gutter");
+      if (gutter) {
+        gutter.innerHTML = Array.from({ length: Math.max(1, lines) }, (_, i) => `<div>${i + 1}</div>`).join("");
+      }
+      updateHighlight();
+    };
+
+    codeBox.onscroll = () => {
+      const gutter = modal.querySelector("#erd-code-gutter");
+      if (gutter) gutter.scrollTop = codeBox.scrollTop;
+      if (highlightLayer) {
+        highlightLayer.scrollTop = codeBox.scrollTop;
+        highlightLayer.scrollLeft = codeBox.scrollLeft;
+      }
     };
 
     if (isSourceType) {
       codeBox.value = originalSeedCode;
+      updateSourceStats();
+      let inputTimer = null;
       codeBox.oninput = () => {
-        isDirty = (codeBox.value !== originalSeedCode);
-        dirtyIndicator.className = isDirty ? "drawio-dirty-badge dirty" : "drawio-dirty-badge clean";
-        dirtyIndicator.textContent = isDirty ? "● Unsaved changes" : "✓ Saved";
-        undoBtn.disabled = false;
+        setDirtyState(codeBox.value !== originalSeedCode);
         updateSourceStats();
+        clearTimeout(inputTimer);
+        inputTimer = setTimeout(() => {
+          pushSourceState();
+        }, 300);
       };
 
       const srcCopyBtn = modal.querySelector("#src-ribbon-copy");
@@ -2587,10 +2811,24 @@ const ErdEditor = (() => {
       const srcWrapBtn = modal.querySelector("#src-ribbon-wrap");
       if (srcWrapBtn) {
         let isWrapped = true;
+        codeBox.style.whiteSpace = "pre-wrap";
+        codeBox.style.overflowX = "hidden";
+        if (highlightLayer) {
+          highlightLayer.style.whiteSpace = "pre-wrap";
+          highlightLayer.style.overflowX = "hidden";
+        }
+        if (codeWrapper) codeWrapper.classList.add("wrap");
+        srcWrapBtn.classList.add("active");
         srcWrapBtn.onclick = () => {
           isWrapped = !isWrapped;
           codeBox.style.whiteSpace = isWrapped ? "pre-wrap" : "pre";
           codeBox.style.overflowX = isWrapped ? "hidden" : "auto";
+          if (highlightLayer) {
+            highlightLayer.style.whiteSpace = isWrapped ? "pre-wrap" : "pre";
+            highlightLayer.style.overflowX = isWrapped ? "hidden" : "auto";
+          }
+          if (codeWrapper) codeWrapper.classList.toggle("wrap", isWrapped);
+          srcWrapBtn.classList.toggle("active", isWrapped);
         };
       }
 
@@ -2634,17 +2872,16 @@ const ErdEditor = (() => {
       if (!confirm("Reset all unsaved in-memory changes back to the original stored state?")) return;
       if (isSourceType) {
         codeBox.value = originalSeedCode;
-        isDirty = false;
-        dirtyIndicator.className = "drawio-dirty-badge clean";
-        dirtyIndicator.textContent = "✓ Saved";
+        setDirtyState(false);
+        sourceHistory.length = 0;
+        sourceHistory.push(originalSeedCode);
+        sourceHistoryIdx = 0;
         undoBtn.disabled = true;
         redoBtn.disabled = true;
         updateSourceStats();
       } else {
         model = parseDiagram(originalSeedCode, detectedType, title);
-        isDirty = false;
-        dirtyIndicator.className = "drawio-dirty-badge clean";
-        dirtyIndicator.textContent = "✓ Saved";
+        setDirtyState(false);
         historyStack.length = 0;
         historyStack.push(JSON.parse(JSON.stringify(model)));
         historyIdx = 0;
@@ -2764,7 +3001,9 @@ const ErdEditor = (() => {
       }
       isDirty = false;
       modal.remove();
-      window.removeEventListener("keydown", onKeyDown);
+      if (typeof window !== "undefined" && window.removeEventListener) {
+        window.removeEventListener("keydown", onKeyDown);
+      }
     };
 
     // Close Button
@@ -2773,12 +3012,16 @@ const ErdEditor = (() => {
         return;
       }
       modal.remove();
-      window.removeEventListener("keydown", onKeyDown);
+      if (typeof window !== "undefined" && window.removeEventListener) {
+        window.removeEventListener("keydown", onKeyDown);
+      }
     };
 
     // Initial render & fit
-    renderCanvas();
-    setTimeout(fitToView, 50);
+    if (!isSourceType) {
+      renderCanvas();
+      setTimeout(fitToView, 50);
+    }
   };
 
   return {
@@ -2805,11 +3048,15 @@ const ErdEditor = (() => {
     generateDrawio,
     generateSvg,
     getElementCodeSnippet,
+    highlightCodeTokens,
     open
   };
 })();
 
-// Export for Node and global module environments
+// Attach to Catalogue and export for Node and global module environments
+if (typeof Catalogue !== "undefined") {
+  Catalogue.highlightCodeTokens = ErdEditor.highlightCodeTokens;
+}
 if (typeof module !== "undefined" && module.exports) {
   module.exports = ErdEditor;
 }

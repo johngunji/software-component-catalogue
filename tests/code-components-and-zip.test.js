@@ -611,4 +611,314 @@ describe('Code Components, Multi-File Packages & ZIP Integrity Audits', () => {
     const zipCheck = await (await fetch(`${baseUrl}/api/components/5`, { headers: { Authorization: `Bearer ${userToken}` } })).json();
     assert.equal(zipCheck.usage.used, countBefore + 2, 'ZIP package download must increment used_count by exactly 1');
   });
+
+  test('isProseDescription accurately distinguishes boilerplate guidance from source code', () => {
+    const app = require('../backend/src/server.js');
+    assert.equal(typeof app.isProseDescription, 'function');
+
+    const flaskProse = 'Install the Flask package using its official setup instructions, configure it at the application boundary, and wrap project-specific usage behind a small module. Verify inputs and outputs with tests before sharing the module across features.';
+    assert.equal(app.isProseDescription(flaskProse), true, 'Flask 241-char boilerplate should be recognized as prose');
+
+    const genericProse = 'Install the CORS Middleware package using its official setup instructions, configure it at the application boundary, and wrap project-specific usage behind a small module.';
+    assert.equal(app.isProseDescription(genericProse), true, 'Boilerplate package instruction should be recognized as prose');
+
+    const designProse = 'For an order system, replace User with Customer, Service with OrderService, and Repository with OrderRepository.';
+    assert.equal(app.isProseDescription(designProse), true, 'Design template guidance should be recognized as prose');
+
+    const pythonCode = 'from flask import Flask, jsonify\napp = Flask(__name__)\n\n@app.route("/")\ndef index():\n    return jsonify({"status": "ok"})\n';
+    assert.equal(app.isProseDescription(pythonCode), false, 'Real Python source code should not be classified as prose');
+
+    const jsCode = 'const express = require("express");\nconst app = express();\nmodule.exports = app;\n';
+    assert.equal(app.isProseDescription(jsCode), false, 'Real JavaScript source code should not be classified as prose');
+
+    const sqlCode = 'CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT);\nSELECT * FROM items;\n';
+    assert.equal(app.isProseDescription(sqlCode), false, 'Real SQL source code should not be classified as prose');
+  });
+
+  test('getTechnologyStarter generates valid starter code with disclaimer for Flask and other technologies', () => {
+    const app = require('../backend/src/server.js');
+    assert.equal(typeof app.getTechnologyStarter, 'function');
+
+    // 1. Flask starter
+    const flaskStarter = app.getTechnologyStarter({ name: 'Flask', tech: 'Python' }, 'py');
+    assert.match(flaskStarter, /Starter template generated for Flask \(Python\) by ComponentHub/);
+    assert.match(flaskStarter, /not authored or tested by the original component contributor/);
+    assert.match(flaskStarter, /from flask import Flask, jsonify, request/);
+    assert.match(flaskStarter, /app = Flask\(__name__\)/);
+    assert.match(flaskStarter, /@app\.route\("\/"\)/);
+    assert.ok(!flaskStarter.includes('Install the Flask package using its official setup instructions'), 'Must not contain 241-char prose description');
+
+    // Syntax validation via Python compiler
+    const pyVerifyFile = path.join(tmpDir, 'test_flask_starter.py');
+    fs.writeFileSync(pyVerifyFile, flaskStarter);
+    execSync(`python3 -m py_compile "${pyVerifyFile}"`);
+    fs.unlinkSync(pyVerifyFile);
+
+    // 2. OpenCV starter
+    const cvStarter = app.getTechnologyStarter({ name: 'OpenCV', tech: 'Python' }, 'py');
+    assert.match(cvStarter, /import numpy as np/);
+    assert.match(cvStarter, /create_sample_canvas/);
+
+    // 3. pytest starter
+    const pytestStarter = app.getTechnologyStarter({ name: 'pytest', tech: 'Python' }, 'py');
+    assert.match(pytestStarter, /import pytest/);
+    assert.match(pytestStarter, /def test_add_success\(\):/);
+
+    // 4. Zustand starter
+    const zustandStarter = app.getTechnologyStarter({ name: 'Zustand', tech: 'React/TypeScript' }, 'ts');
+    assert.match(zustandStarter, /import \{ create \} from "zustand";/);
+    assert.match(zustandStarter, /export const useStore = create/);
+
+    // 5. Express starter
+    const expressStarter = app.getTechnologyStarter({ name: 'Express', tech: 'Node.js' }, 'js');
+    assert.match(expressStarter, /const express = require\("express"\);/);
+    assert.match(expressStarter, /module\.exports = app;/);
+  });
+
+  test('Flask component (id=2) ZIP contains valid Python application in example.py and prose in README.md', async () => {
+    // 1. Fetch Flask component
+    const res = await fetch(`${baseUrl}/api/components/2`, {
+      headers: { Authorization: `Bearer ${userToken}` }
+    });
+    assert.equal(res.status, 200);
+    const comp = await res.json();
+    assert.equal(comp.name, 'Flask');
+    assert.equal(comp.type, 'Code');
+
+    // 2. Download ZIP
+    const zipRes = await fetch(`${baseUrl}/api/components/2/zip`, {
+      headers: { Authorization: `Bearer ${userToken}` }
+    });
+    assert.equal(zipRes.status, 200);
+
+    // 3. Extract and verify contents
+    const zipBuffer = Buffer.from(await zipRes.arrayBuffer());
+    const verifyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'flask-zip-'));
+    const zipPath = path.join(verifyDir, 'flask.zip');
+    fs.writeFileSync(zipPath, zipBuffer);
+
+    execSync(`unzip -t "${zipPath}"`);
+    execSync(`unzip -o "${zipPath}" -d "${verifyDir}/out"`);
+
+    const examplePyPath = path.join(verifyDir, 'out', 'example.py');
+    const readmePath = path.join(verifyDir, 'out', 'README.md');
+    const reqPath = path.join(verifyDir, 'out', 'requirements.txt');
+    const pkgPath = path.join(verifyDir, 'out', 'package.json');
+
+    assert.ok(fs.existsSync(examplePyPath), 'example.py must exist in package');
+    assert.ok(fs.existsSync(readmePath), 'README.md must exist in package');
+    assert.ok(fs.existsSync(reqPath), 'requirements.txt must exist in package');
+    assert.ok(!fs.existsSync(pkgPath), 'package.json must NOT exist for Flask Python package');
+
+    const exampleContent = fs.readFileSync(examplePyPath, 'utf8');
+    assert.match(exampleContent, /from flask import Flask/);
+    assert.match(exampleContent, /app = Flask\(__name__\)/);
+    assert.ok(!exampleContent.includes('Install the Flask package using its official setup instructions'), 'example.py must NEVER contain the 241-char prose description');
+
+    // Verify example.py compiles cleanly with python3
+    execSync(`python3 -m py_compile "${examplePyPath}"`);
+
+    // Verify README.md contains integration guidance as prose (not in Python code fence)
+    const readmeContent = fs.readFileSync(readmePath, 'utf8');
+    assert.match(readmeContent, /## Integration Guidance/);
+    assert.match(readmeContent, /Install the Flask package using its official setup instructions/);
+    assert.ok(!readmeContent.includes('```py\nInstall the Flask package'), 'README must not wrap English prose in a py code block');
+
+    // Clean up
+    fs.rmSync(verifyDir, { recursive: true, force: true });
+  });
+
+  test('Cataloguer saves edited code starter to catalogue and reopening loads saved content', async () => {
+    // 1. Create a fresh Code component with no artifacts
+    const createRes = await fetch(`${baseUrl}/api/components`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${cataloguerToken}`
+      },
+      body: JSON.stringify({
+        name: 'CustomPythonService',
+        description: 'Microservice starter in Python',
+        categoryId: 1,
+        type: 'Code',
+        language: 'Python',
+        keywords: ['microservice', 'python'],
+        usageNotes: 'Start service via python example.py',
+        deliveryMethod: 'Package',
+        reuseMethod: 'Clone and run'
+      })
+    });
+    assert.equal(createRes.status, 201);
+    const comp = await createRes.json();
+    const compId = comp.id;
+
+    // Initially artifacts list is empty
+    const initialGet = await (await fetch(`${baseUrl}/api/components/${compId}`, {
+      headers: { Authorization: `Bearer ${userToken}` }
+    })).json();
+    assert.equal(initialGet.artifacts.length, 0);
+
+    // 2. Cataloguer saves custom starter code to catalogue
+    const customCode = 'import sys\n\ndef run():\n    print("Custom Python Service running")\n\nif __name__ == "__main__":\n    run()\n';
+    const saveRes = await fetch(`${baseUrl}/api/components/${compId}/artifacts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${cataloguerToken}`
+      },
+      body: JSON.stringify({
+        name: `${comp.name} Source`,
+        description: 'Source file for CustomPythonService',
+        variantType: 'Source',
+        deliveryMethod: 'Editable Source',
+        artifactFormat: 'python',
+        contentType: 'text/plain',
+        content: customCode,
+        downloadFilename: 'example.py',
+        reuseMethod: 'Copy and edit',
+        isPrimary: true,
+        sortOrder: 0
+      })
+    });
+    assert.equal(saveRes.status, 201);
+    const savedArtifact = await saveRes.json();
+    assert.ok(savedArtifact.id > 0);
+    assert.equal(savedArtifact.content, customCode);
+
+    // 3. Reopening the component returns the saved artifact from the database
+    const reopenedRes = await fetch(`${baseUrl}/api/components/${compId}`, {
+      headers: { Authorization: `Bearer ${userToken}` }
+    });
+    assert.equal(reopenedRes.status, 200);
+    const reopened = await reopenedRes.json();
+    assert.equal(reopened.artifacts.length, 1);
+    assert.equal(reopened.artifacts[0].content, customCode);
+    assert.equal(reopened.artifacts[0].downloadFilename, 'example.py');
+
+    // 4. Downloading ZIP package yields the saved custom code
+    const zipRes = await fetch(`${baseUrl}/api/components/${compId}/zip`, {
+      headers: { Authorization: `Bearer ${userToken}` }
+    });
+    assert.equal(zipRes.status, 200);
+    const zipBuffer = Buffer.from(await zipRes.arrayBuffer());
+
+    const verifyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'custom-zip-'));
+    const zipPath = path.join(verifyDir, 'custom.zip');
+    fs.writeFileSync(zipPath, zipBuffer);
+    execSync(`unzip -o "${zipPath}" -d "${verifyDir}/out"`);
+
+    const extractedFile = path.join(verifyDir, 'out', 'example.py');
+    assert.ok(fs.existsSync(extractedFile));
+    assert.equal(fs.readFileSync(extractedFile, 'utf8'), customCode);
+
+    fs.rmSync(verifyDir, { recursive: true, force: true });
+  });
+
+  test('Syntax highlighter and tokenizer handles Python docstrings, decorators, keywords, and JS correctly', async () => {
+    // Extract highlight logic from app.js to test directly
+    const { fileURLToPath } = await import('node:url');
+    const rootDir = path.dirname(fileURLToPath(import.meta.url));
+    const appJsContent = fs.readFileSync(path.join(rootDir, '../frontend/js/app.js'), 'utf8');
+    const erdJsContent = fs.readFileSync(path.join(rootDir, '../frontend/js/erd-editor.js'), 'utf8');
+    const cssContent = fs.readFileSync(path.join(rootDir, '../frontend/css/style.css'), 'utf8');
+
+    // 1. Verify CSS rules exist for all VS Code Light tokens
+    assert.ok(cssContent.includes('.token-com { color: #008000;'), 'Comments green');
+    assert.ok(cssContent.includes('.token-kw  { color: #0000ff;'), 'Keywords blue');
+    assert.ok(cssContent.includes('.token-str { color: #a31515;'), 'Strings red');
+    assert.ok(cssContent.includes('.token-num { color: #098658;'), 'Numbers teal/green');
+    assert.ok(cssContent.includes('.token-fn  { color: #795e26;'), 'Function names golden brown');
+    assert.ok(cssContent.includes('.token-typ { color: #001080;'), 'Builtins/Types navy');
+    assert.ok(cssContent.includes('.token-dec { color: #af00db;'), 'Decorators violet');
+
+    // 2. Verify erd-editor HTML structure: drawio-code-header is properly closed and precedes editor container
+    const headerMatch = erdJsContent.match(/<div class="drawio-code-header">[\s\S]*?<\/div>\s*<div class="drawio-code-editor-container"/);
+    assert.ok(headerMatch, 'drawio-code-header is closed before drawio-code-editor-container');
+
+    // 3. Verify copy code button has feedback and clipboard handler
+    assert.ok(erdJsContent.includes('copyCodeBtn.textContent = "✓ Copied!"'), 'erd-copy-code-btn provides visible feedback');
+
+    // 4. Test renderCodeLines tokenizer execution with sample Python code
+    const vm = require('vm');
+    const sandbox = {
+      Catalogue: { esc: s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])) },
+      window: {},
+      document: { querySelector: () => null, body: { dataset: {} } },
+      location: { hostname: 'localhost', search: '' }
+    };
+    // Extract renderCodeLines function body from app.js
+    const renderFnMatch = appJsContent.match(/const renderCodeLines = \([\s\S]*?\n  \};/);
+    assert.ok(renderFnMatch, 'renderCodeLines found in app.js');
+    vm.createContext(sandbox);
+    vm.runInContext(`const C = Catalogue, E = C.esc;\nglobalThis.renderCodeLines = ${renderFnMatch[0].replace('const renderCodeLines = ', '')}`, sandbox);
+
+    const pyCode = `"""
+Starter docstring.
+"""
+from flask import Flask, jsonify
+
+app = Flask(__name__)
+
+@app.route("/", methods=["GET"])
+def index():
+    return jsonify({"status": "ok", "count": 42})
+`;
+
+    const htmlOutput = sandbox.renderCodeLines(pyCode, 'py');
+    assert.ok(htmlOutput.includes('token-com'), 'Contains docstring comment tokens');
+    assert.ok(htmlOutput.includes('token-dec'), 'Contains decorator tokens');
+    assert.ok(htmlOutput.includes('token-kw'), 'Contains keyword tokens');
+    assert.ok(htmlOutput.includes('token-fn'), 'Contains function tokens');
+    assert.ok(htmlOutput.includes('token-str'), 'Contains string tokens');
+    assert.ok(htmlOutput.includes('token-num'), 'Contains number tokens');
+    assert.ok(htmlOutput.includes('token-typ'), 'Contains built-in / type tokens');
+
+    // 5. Test JavaScript code highlighting
+    const jsCode = `const express = require("express");
+const app = express();
+app.get("/health", (req, res) => res.json({ ok: true }));
+`;
+    const jsOutput = sandbox.renderCodeLines(jsCode, 'javascript');
+    assert.ok(jsOutput.includes('token-kw'), 'Contains JS keyword tokens');
+    assert.ok(jsOutput.includes('token-str'), 'Contains JS string tokens');
+    assert.ok(jsOutput.includes('token-typ'), 'Contains JS built-in tokens');
+  });
+
+  test('Source editor modal incorporates synchronized syntax highlighting overlay with VS Code Light styling', async () => {
+    const { fileURLToPath } = await import('node:url');
+    const rootDir = path.dirname(fileURLToPath(import.meta.url));
+    const erdJsContent = fs.readFileSync(path.join(rootDir, '../frontend/js/erd-editor.js'), 'utf8');
+    const cssContent = fs.readFileSync(path.join(rootDir, '../frontend/css/style.css'), 'utf8');
+
+    // 1. Verify editor HTML template includes highlight layer and code wrapper
+    assert.ok(erdJsContent.includes('id="erd-code-wrapper"'), 'erd-code-wrapper exists in template');
+    assert.ok(erdJsContent.includes('id="erd-code-highlight-layer"'), 'erd-code-highlight-layer exists in template');
+    assert.ok(erdJsContent.includes('id="erd-code-highlight-code"'), 'erd-code-highlight-code exists in template');
+
+    // 2. Verify style.css includes overlay positioning and caret-color
+    assert.ok(cssContent.includes('.drawio-code-wrapper {'), 'drawio-code-wrapper CSS exists');
+    assert.ok(cssContent.includes('.drawio-code-highlight-layer {'), 'drawio-code-highlight-layer CSS exists');
+    assert.ok(cssContent.includes('caret-color: #000000;'), 'Caret color is styled for transparent textarea overlay');
+    assert.ok(cssContent.includes('pointer-events: none;'), 'Highlight layer passes pointer events to textarea');
+
+    // 3. Verify ErdEditor exports highlightCodeTokens
+    const ErdEditor = require('../frontend/js/erd-editor.js');
+    assert.equal(typeof ErdEditor.highlightCodeTokens, 'function', 'ErdEditor exports highlightCodeTokens function');
+
+    // 4. Test ErdEditor.highlightCodeTokens on Python code
+    const pyCode = `from flask import Flask, jsonify\napp = Flask(__name__)\n@app.route("/")\ndef index():\n    return jsonify({"status": "healthy"})\n`;
+    const tokens = ErdEditor.highlightCodeTokens(pyCode, 'python');
+    assert.ok(tokens.length >= 4, 'Returns tokenized lines');
+    const joined = tokens.join('\n');
+    assert.ok(joined.includes('token-kw'), 'Contains keyword token');
+    assert.ok(joined.includes('token-dec'), 'Contains decorator token');
+    assert.ok(joined.includes('token-typ'), 'Contains type/builtin token');
+    assert.ok(joined.includes('token-fn'), 'Contains function token');
+    assert.ok(joined.includes('token-str'), 'Contains string token');
+
+    // 5. Verify scroll and wrap synchronization logic in erd-editor.js
+    assert.ok(erdJsContent.includes('highlightLayer.scrollTop = codeBox.scrollTop'), 'Scroll top synchronization wired');
+    assert.ok(erdJsContent.includes('highlightLayer.scrollLeft = codeBox.scrollLeft'), 'Scroll left synchronization wired');
+    assert.ok(erdJsContent.includes('codeWrapper.classList.toggle("wrap"'), 'Word-wrap toggles wrapper class');
+  });
 });

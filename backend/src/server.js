@@ -142,6 +142,469 @@ function createZipArchive(files = []) {
     return Buffer.concat([...localHeaders, centralDirBuffer, eocd]);
 }
 
+function isProseDescription(text) {
+    if (!text || typeof text !== "string") return false;
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+
+    if (/^Install the .+ package using its official setup instructions/i.test(trimmed)) return true;
+    if (/wrap project-specific usage behind a small module/i.test(trimmed)) return true;
+    if (/Verify inputs and outputs with tests before sharing/i.test(trimmed)) return true;
+    if (/^(Replace|Adapt|Rename|For an?|Follow the)\b/i.test(trimmed) &&
+        !trimmed.includes("{") && !trimmed.includes(";") && !trimmed.includes("def ") && !trimmed.includes("import ")) {
+        return true;
+    }
+
+    const codeIndicators = [
+        /\b(import\s+[\w*{]|from\s+[\w.]+\s+import|def\s+\w+\(|class\s+\w+|function\s+\w+\(|const\s+\w+\s*=|let\s+\w+\s*=|var\s+\w+\s*=|export\s+(default|const|let|function|class)|module\.exports\s*=|require\(|public\s+class|package\s+\w+|fn\s+\w+\(|struct\s+\w+|#include\b)/,
+        /=>/,
+        /console\.(log|error|warn)\(/,
+        /print\s*\(/,
+        /SELECT\s+.+\s+FROM/i,
+        /CREATE\s+TABLE/i,
+        /INSERT\s+INTO/i
+    ];
+    if (codeIndicators.some(pattern => pattern.test(trimmed))) return false;
+
+    const lines = trimmed.split("\n").map(l => l.trim()).filter(Boolean);
+    if (lines.length > 0 && lines.every(l => /^[A-Z].*[\.!?]$/.test(l) && !/[{};<>=]/.test(l))) {
+        return true;
+    }
+
+    return false;
+}
+
+function getTechnologyStarter(component = {}, ext = "js") {
+    const name = component.name || "Component";
+    const tech = component.tech || component.language || "";
+    const nameLower = name.toLowerCase();
+    const techLower = String(tech).toLowerCase();
+
+    const disclaimer = (style) => {
+        if (style === "hash") {
+            return [
+                `# Starter template generated for ${name} (${tech || "Generic"}) by ComponentHub.`,
+                `# This starter is an illustrative template to help you begin integration;`,
+                `# it was not authored or tested by the original component contributor.`,
+                ""
+            ].join("\n");
+        }
+        if (style === "dash") {
+            return [
+                `-- Starter template generated for ${name} (${tech || "Generic"}) by ComponentHub.`,
+                `-- This starter is an illustrative template to help you begin integration;`,
+                `-- it was not authored or tested by the original component contributor.`,
+                ""
+            ].join("\n");
+        }
+        if (style === "python") {
+            return [
+                `"""`,
+                `Starter template generated for ${name} (${tech || "Generic"}) by ComponentHub.`,
+                `This starter is an illustrative template to help you begin integration;`,
+                `it was not authored or tested by the original component contributor.`,
+                `"""`,
+                ""
+            ].join("\n");
+        }
+        return [
+            `/**`,
+            ` * Starter template generated for ${name} (${tech || "Generic"}) by ComponentHub.`,
+            ` * This starter is an illustrative template to help you begin integration;`,
+            ` * it was not authored or tested by the original component contributor.`,
+            ` */`,
+            ""
+        ].join("\n");
+    };
+
+    // 1. Python ecosystem
+    if (ext === "py" || techLower.includes("python")) {
+        const head = disclaimer("python");
+        if (nameLower.includes("flask")) {
+            return head + [
+                `from flask import Flask, jsonify, request`,
+                ``,
+                `app = Flask(__name__)`,
+                ``,
+                `@app.route("/")`,
+                `def home():`,
+                `    return jsonify({`,
+                `        "status": "ok",`,
+                `        "message": "Welcome to Flask application"`,
+                `    })`,
+                ``,
+                `@app.route("/api/health")`,
+                `def health():`,
+                `    return jsonify({"status": "healthy"})`,
+                ``,
+                `if __name__ == "__main__":`,
+                `    app.run(host="0.0.0.0", port=5000, debug=True)`,
+                ``
+            ].join("\n");
+        }
+        if (nameLower.includes("opencv") || nameLower.includes("cv2")) {
+            return head + [
+                `import numpy as np`,
+                ``,
+                `def create_sample_canvas(width=640, height=480):`,
+                `    canvas = np.zeros((height, width, 3), dtype=np.uint8)`,
+                `    return canvas`,
+                ``,
+                `if __name__ == "__main__":`,
+                `    img = create_sample_canvas()`,
+                `    print(f"Canvas created with shape: {img.shape}")`,
+                ``
+            ].join("\n");
+        }
+        if (nameLower.includes("pytest")) {
+            return head + [
+                `import pytest`,
+                ``,
+                `def add(a, b):`,
+                `    return a + b`,
+                ``,
+                `def test_add_success():`,
+                `    assert add(2, 3) == 5`,
+                ``,
+                `def test_add_negative():`,
+                `    assert add(-1, 1) == 0`,
+                ``,
+                `if __name__ == "__main__":`,
+                `    pytest.main([__file__])`,
+                ``
+            ].join("\n");
+        }
+        if (nameLower.includes("pydantic")) {
+            return head + [
+                `from pydantic import BaseModel, Field`,
+                `from typing import Optional`,
+                ``,
+                `class ItemModel(BaseModel):`,
+                `    id: int`,
+                `    name: str = Field(..., min_length=1)`,
+                `    description: Optional[str] = None`,
+                `    price: float = Field(..., gt=0.0)`,
+                ``,
+                `if __name__ == "__main__":`,
+                `    item = ItemModel(id=1, name="Sample Item", price=19.99)`,
+                `    print(item.model_dump_json(indent=2) if hasattr(item, "model_dump_json") else item.json())`,
+                ``
+            ].join("\n");
+        }
+        if (nameLower.includes("marshmallow")) {
+            return head + [
+                `from marshmallow import Schema, fields, validate`,
+                ``,
+                `class ItemSchema(Schema):`,
+                `    id = fields.Int(required=True)`,
+                `    name = fields.Str(required=True, validate=validate.Length(min=1))`,
+                `    price = fields.Float(required=True)`,
+                ``,
+                `if __name__ == "__main__":`,
+                `    schema = ItemSchema()`,
+                `    result = schema.load({"id": 1, "name": "Sample Item", "price": 19.99})`,
+                `    print("Validated:", result)`,
+                ``
+            ].join("\n");
+        }
+        return head + [
+            `def main():`,
+            `    print("Starter script for ${name} initialized")`,
+            ``,
+            `if __name__ == "__main__":`,
+            `    main()`,
+            ``
+        ].join("\n");
+    }
+
+    // 2. React / TypeScript UI
+    if (nameLower.includes("zustand")) {
+        const head = disclaimer("c");
+        return head + [
+            `import { create } from "zustand";`,
+            ``,
+            `interface State {`,
+            `  count: number;`,
+            `  increment: () => void;`,
+            `  reset: () => void;`,
+            `}`,
+            ``,
+            `export const useStore = create<State>((set) => ({`,
+            `  count: 0,`,
+            `  increment: () => set((state) => ({ count: state.count + 1 })),`,
+            `  reset: () => set({ count: 0 }),`,
+            `}));`,
+            ``
+        ].join("\n");
+    }
+
+    // 3. Testing libraries (Vitest, Jest, Supertest, Sinon)
+    if (nameLower.includes("vitest")) {
+        const head = disclaimer("c");
+        return head + [
+            `import { describe, it, expect } from "vitest";`,
+            ``,
+            `describe("Vitest starter suite", () => {`,
+            `  it("executes assertions accurately", () => {`,
+            `    expect(Math.max(1, 5, 10)).toBe(10);`,
+            `  });`,
+            `});`,
+            ``
+        ].join("\n");
+    }
+    if (nameLower.includes("jest")) {
+        const head = disclaimer("c");
+        return head + [
+            `describe("Sample test suite", () => {`,
+            `  test("basic assertion verifies truthiness", () => {`,
+            `    expect(1 + 1).toBe(2);`,
+            `  });`,
+            `});`,
+            ``
+        ].join("\n");
+    }
+    if (nameLower.includes("supertest")) {
+        const head = disclaimer("c");
+        return head + [
+            `const request = require("supertest");`,
+            ``,
+            `async function runSmokeTest(app) {`,
+            `  const res = await request(app).get("/health");`,
+            `  return res.status === 200;`,
+            `}`,
+            ``,
+            `module.exports = { runSmokeTest };`,
+            ``
+        ].join("\n");
+    }
+    if (nameLower.includes("sinon")) {
+        const head = disclaimer("c");
+        return head + [
+            `const sinon = require("sinon");`,
+            ``,
+            `function exampleWorkflow(callback) {`,
+            `  return callback("success");`,
+            `}`,
+            ``,
+            `const spy = sinon.spy();`,
+            `exampleWorkflow(spy);`,
+            `console.log("Called once:", spy.calledOnce);`,
+            ``
+        ].join("\n");
+    }
+
+    // 4. Node / JS utilities (dotenv, node-cache, papaparse, nodemailer, node-postgres)
+    if (nameLower.includes("dotenv")) {
+        const head = disclaimer("c");
+        return head + [
+            `require("dotenv").config();`,
+            ``,
+            `const port = process.env.PORT || 3000;`,
+            `const nodeEnv = process.env.NODE_ENV || "development";`,
+            ``,
+            `console.log(\`Loaded environment for \${nodeEnv} on port \${port}\`);`,
+            ``
+        ].join("\n");
+    }
+    if (nameLower.includes("node-cache")) {
+        const head = disclaimer("c");
+        return head + [
+            `const NodeCache = require("node-cache");`,
+            `const cache = new NodeCache({ stdTTL: 100, checkperiod: 120 });`,
+            ``,
+            `cache.set("status", "ready");`,
+            `console.log("Cached value:", cache.get("status"));`,
+            ``,
+            `module.exports = cache;`,
+            ``
+        ].join("\n");
+    }
+    if (nameLower.includes("papa parse") || nameLower.includes("papaparse")) {
+        const head = disclaimer("c");
+        return head + [
+            `const Papa = require("papaparse");`,
+            ``,
+            `const csvData = "name,role\\nAlice,Admin\\nBob,User";`,
+            `const parsed = Papa.parse(csvData, { header: true });`,
+            ``,
+            `console.log("Parsed rows:", parsed.data);`,
+            `module.exports = parsed;`,
+            ``
+        ].join("\n");
+    }
+    if (nameLower.includes("nodemailer")) {
+        const head = disclaimer("c");
+        return head + [
+            `const nodemailer = require("nodemailer");`,
+            ``,
+            `async function createTestClient() {`,
+            `  const testAccount = await nodemailer.createTestAccount();`,
+            `  return nodemailer.createTransport({`,
+            `    host: "smtp.ethereal.email",`,
+            `    port: 587,`,
+            `    secure: false,`,
+            `    auth: {`,
+            `      user: testAccount.user,`,
+            `      pass: testAccount.pass,`,
+            `    },`,
+            `  });`,
+            `}`,
+            ``,
+            `module.exports = { createTestClient };`,
+            ``
+        ].join("\n");
+    }
+    if (nameLower.includes("postgres") || nameLower.includes("node-postgres") || nameLower === "pg") {
+        const head = disclaimer("c");
+        return head + [
+            `const { Pool } = require("pg");`,
+            ``,
+            `const pool = new Pool({`,
+            `  connectionString: process.env.DATABASE_URL || "postgresql://localhost:5432/app",`,
+            `});`,
+            ``,
+            `async function queryHealth() {`,
+            `  const client = await pool.connect();`,
+            `  try {`,
+            `    const res = await client.query("SELECT NOW()");`,
+            `    return res.rows[0];`,
+            `  } finally {`,
+            `    client.release();`,
+            `  }`,
+            `}`,
+            ``,
+            `module.exports = { pool, queryHealth };`,
+            ``
+        ].join("\n");
+    }
+
+    // 5. Express / Server frameworks
+    if (nameLower.includes("express")) {
+        const head = disclaimer("c");
+        return head + [
+            `const express = require("express");`,
+            `const app = express();`,
+            `const port = process.env.PORT || 3000;`,
+            ``,
+            `app.use(express.json());`,
+            ``,
+            `app.get("/", (req, res) => {`,
+            `  res.json({ status: "ok", message: "Express starter active" });`,
+            `});`,
+            ``,
+            `app.get("/health", (req, res) => {`,
+            `  res.json({ status: "healthy" });`,
+            `});`,
+            ``,
+            `if (require.main === module) {`,
+            `  app.listen(port, () => {`,
+            `    console.log(\`Server listening on port \${port}\`);`,
+            `  });`,
+            `}`,
+            ``,
+            `module.exports = app;`,
+            ``
+        ].join("\n");
+    }
+
+    // 6. Redis
+    if (nameLower.includes("redis")) {
+        const head = disclaimer("c");
+        return head + [
+            `// Example client wrapper for Redis`,
+            `const Redis = require("ioredis");`,
+            `const client = new Redis(process.env.REDIS_URL || "redis://localhost:6379");`,
+            ``,
+            `client.on("connect", () => console.log("Connected to Redis"));`,
+            `module.exports = client;`,
+            ``
+        ].join("\n");
+    }
+
+    // 7. SQL
+    if (ext === "sql" || techLower.includes("sql")) {
+        const head = disclaimer("dash");
+        return head + [
+            `CREATE TABLE IF NOT EXISTS items (`,
+            `    id INTEGER PRIMARY KEY AUTOINCREMENT,`,
+            `    name TEXT NOT NULL,`,
+            `    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+            `);`,
+            ``,
+            `INSERT INTO items (name) VALUES ('Initial Item');`,
+            `SELECT * FROM items;`,
+            ``
+        ].join("\n");
+    }
+
+    // 8. YAML / OpenAPI / GitHub Actions
+    if (ext === "yaml" || ext === "yml" || techLower.includes("yaml")) {
+        const head = disclaimer("hash");
+        if (nameLower.includes("action") || nameLower.includes("ci")) {
+            return head + [
+                `name: CI`,
+                `on: [push, pull_request]`,
+                `jobs:`,
+                `  build:`,
+                `    runs-on: ubuntu-latest`,
+                `    steps:`,
+                `      - uses: actions/checkout@v4`,
+                `      - name: Setup Node.js`,
+                `        uses: actions/setup-node@v4`,
+                `        with:`,
+                `          node-version: 20`,
+                `      - run: npm test`,
+                ``
+            ].join("\n");
+        }
+        return head + [
+            `openapi: 3.0.3`,
+            `info:`,
+            `  title: ${name} API`,
+            `  version: 1.0.0`,
+            `paths:`,
+            `  /health:`,
+            `    get:`,
+            `      summary: Health check`,
+            `      responses:`,
+            `        '200':`,
+            `          description: OK`,
+            ``
+        ].join("\n");
+    }
+
+    // 9. Generic Fallbacks by extension
+    if (ext === "js" || ext === "ts") {
+        const head = disclaimer("c");
+        return head + [
+            `function main() {`,
+            `  console.log("Starter template initialized for ${name}");`,
+            `}`,
+            ``,
+            `if (typeof module !== "undefined" && module.exports) {`,
+            `  module.exports = { main };`,
+            `}`,
+            ``
+        ].join("\n");
+    }
+
+    if (ext === "json") {
+        return JSON.stringify({
+            name: name.toLowerCase().replace(/[^a-z0-9._-]/g, "-"),
+            version: "1.0.0",
+            description: component.description || "Generated starter configuration",
+            componentHubGenerated: true
+        }, null, 2) + "\n";
+    }
+
+    // Catch-all
+    const head = disclaimer("c");
+    return head + [
+        `// Starter template for ${name}`,
+        ``
+    ].join("\n");
+}
+
 
 
 /* =========================================================
@@ -1874,6 +2337,11 @@ app.get(
             else if (tech.includes("html")) ext = "html";
             else if (tech.includes("css")) ext = "css";
 
+            const isProse = isProseDescription(component.example_content);
+            const starterCode = (component.example_content && !isProse)
+                ? component.example_content
+                : getTechnologyStarter(component, ext);
+
             const readmeLines = [
                 `# ${component.name || "Component"}`,
                 "",
@@ -1882,15 +2350,14 @@ app.get(
                 component.install_command ? `## Installation\n\`\`\`bash\n${component.install_command}\n\`\`\`\n` : "",
                 component.reuse_method ? `## Reuse Approach\n${component.reuse_method}\n` : "",
                 component.usage_notes ? `## Usage Guidance\n${component.usage_notes}\n` : "",
-                component.example_content ? `## Example Adaptation\n\`\`\`${ext}\n${component.example_content}\n\`\`\`\n` : "",
+                isProse && component.example_content ? `## Integration Guidance\n${component.example_content}\n` : "",
+                !isProse && component.example_content ? `## Example Adaptation\n\`\`\`${ext}\n${component.example_content}\n\`\`\`\n` : "",
                 component.url ? `## Documentation\n[Official Reference & Repository](${component.url})\n` : ""
             ].filter(Boolean).join("\n");
 
             files.push({ filename: "README.md", content: readmeLines });
 
-            if (component.example_content) {
-                files.push({ filename: `example.${ext}`, content: component.example_content });
-            }
+            files.push({ filename: `example.${ext}`, content: starterCode });
 
             if (component.install_command && (ext === "js" || ext === "ts")) {
                 const pkgJson = JSON.stringify({
@@ -2674,5 +3141,8 @@ if (
 
 }
 
+
+app.isProseDescription = isProseDescription;
+app.getTechnologyStarter = getTechnologyStarter;
 
 module.exports = app;

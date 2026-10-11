@@ -5,6 +5,11 @@ const C = Catalogue, E = C.esc;
 const $ = s => document.querySelector(s);
 // Create the markup used by the Lucide icon renderer.
 const ic = n => `<i data-lucide="${n}"></i>`;
+const safeCreateIcons = () => {
+  if (typeof lucide !== "undefined" && typeof lucide.createIcons === "function") {
+    try { lucide.createIcons(); } catch {}
+  }
+};
 // Copy text using the Clipboard API with a browser-compatible fallback.
 const copyText = async text => {
   try {
@@ -687,7 +692,7 @@ P.browse = () => {
       </div>
       `;
 
-    lucide.createIcons();
+    safeCreateIcons();
   };
 
 
@@ -784,7 +789,7 @@ P.search = () => {
       </div>
       `;
 
-    lucide.createIcons();
+    safeCreateIcons();
   };
 
 
@@ -900,43 +905,573 @@ P.component = async () => {
     return "source";
   };
 
-  const highlightCodeLine = (lineStr, format) => {
-    const escaped = E(lineStr);
-    const fmt = String(format || "").toLowerCase();
-    if (["txt", "text"].includes(fmt)) return escaped;
-
-    // Comments
-    if (/^\s*(\/\/|#|--|\/\*|\*)/.test(lineStr)) {
-      return `<span class="token-com">${escaped}</span>`;
-    }
-
-    let res = escaped;
-    // Strings
-    res = res.replace(/(["'`])(?:(?=(\\?))\2.)*?\1/g, '<span class="token-str">$&</span>');
-
-    // Keywords
-    const kwRegex = /\b(const|let|var|function|return|import|export|from|as|default|class|extends|implements|interface|type|enum|public|private|protected|async|await|try|catch|finally|throw|new|typeof|instanceof|if|else|switch|case|break|continue|for|while|do|in|of|def|self|None|True|False|elif|lambda|with|yield|pass|struct|fn|pub|impl|mut|match|trait|where|select|from|where|insert|into|values|update|set|delete|create|table|drop|alter|null|true|false)\b/gi;
-    res = res.replace(kwRegex, match => `<span class="token-kw">${match}</span>`);
-
-    // Numbers
-    res = res.replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="token-num">$1</span>');
-
-    return res;
-  };
-
   const renderCodeLines = (content, format) => {
     if (!content) return '<div class="code-line"><span class="line-num">1</span><span class="line-text" style="color:#64748b;">(empty file)</span></div>';
     const lines = String(content).split(/\r?\n/);
-    return lines.map((line, idx) => `
-      <div class="code-line">
-        <span class="line-num">${idx + 1}</span>
-        <span class="line-text">${highlightCodeLine(line, format)}</span>
-      </div>
-    `).join("");
+    const fmt = String(format || "").toLowerCase();
+    const isPython = ["py", "python"].includes(fmt);
+    let inDocstring = false;
+    let docstringDelimiter = "";
+
+    return lines.map((lineStr, idx) => {
+      // 1. Python multi-line triple-quoted docstring tracking
+      if (isPython) {
+        const trimmed = lineStr.trim();
+        if (!inDocstring) {
+          if (/^("""|''')/.test(trimmed)) {
+            const delim = trimmed.slice(0, 3);
+            const rest = trimmed.slice(3);
+            if (rest.includes(delim)) {
+              return `<div class="code-line"><span class="line-num">${idx + 1}</span><span class="line-text"><span class="token-com">${E(lineStr)}</span></span></div>`;
+            } else {
+              inDocstring = true;
+              docstringDelimiter = delim;
+              return `<div class="code-line"><span class="line-num">${idx + 1}</span><span class="line-text"><span class="token-com">${E(lineStr)}</span></span></div>`;
+            }
+          }
+        } else {
+          const finished = lineStr.includes(docstringDelimiter);
+          if (finished) {
+            inDocstring = false;
+            docstringDelimiter = "";
+          }
+          return `<div class="code-line"><span class="line-num">${idx + 1}</span><span class="line-text"><span class="token-com">${E(lineStr)}</span></span></div>`;
+        }
+      }
+
+      const escaped = E(lineStr);
+      if (["txt", "text"].includes(fmt)) {
+        return `<div class="code-line"><span class="line-num">${idx + 1}</span><span class="line-text">${escaped}</span></div>`;
+      }
+
+      // Full-line comments & comment blocks (//, #, --, /*, *)
+      if (/^\s*(\/\/|#|--|\/\*|\*)/.test(lineStr)) {
+        return `<div class="code-line"><span class="line-num">${idx + 1}</span><span class="line-text"><span class="token-com">${escaped}</span></span></div>`;
+      }
+
+      let text = escaped;
+      const tokens = [];
+      const putToken = (cls, content) => {
+        const i = tokens.length;
+        tokens.push(`<span class="${cls}">${content}</span>`);
+        return String.fromCharCode(0xE000 + i);
+      };
+
+      // 1. Strings: match &quot;...&quot;, &#39;...&#39;, `...`
+      text = text.replace(/(&quot;|&#39;|[`])(?:(?=(\\?))\2.)*?\1/g, match => putToken("token-str", match));
+
+      // 2. Trailing comments
+      text = text.replace(/(\s*(?:\/\/|#|--)\s*.*)$/, match => putToken("token-com", match));
+
+      // 3. Python decorators: @app.route
+      if (isPython) {
+        text = text.replace(/(@[a-zA-Z_][a-zA-Z0-9_.]*)/g, match => putToken("token-dec", match));
+      }
+
+      // 4. Function & Class definitions: def fnName, class ClassName
+      if (isPython) {
+        text = text.replace(/\b(def)\s+([a-zA-Z_]\w*)/g, (match, defKw, fnName) => {
+          return putToken("token-kw", defKw) + " " + putToken("token-fn", fnName);
+        });
+        text = text.replace(/\b(class)\s+([a-zA-Z_]\w*)/g, (match, clsKw, clsName) => {
+          return putToken("token-kw", clsKw) + " " + putToken("token-typ", clsName);
+        });
+      }
+
+      // 5. Keywords
+      const kwRegex = /\b(const|let|var|function|return|import|export|from|as|default|class|extends|implements|interface|type|enum|public|private|protected|async|await|try|catch|finally|throw|new|typeof|instanceof|if|else|switch|case|break|continue|for|while|do|in|of|def|self|None|True|False|elif|lambda|with|yield|pass|struct|fn|pub|impl|mut|match|trait|where|select|insert|into|values|update|set|delete|create|table|drop|alter|null|true|false)\b/g;
+      text = text.replace(kwRegex, match => putToken("token-kw", match));
+
+      // 6. Common built-in objects & globals
+      const builtinRegex = /\b(console|process|module|require|Math|JSON|Promise|Flask|jsonify|request|document|window|self|print|len|range|int|str|float|list|dict|set|tuple|bool|type|open)\b/g;
+      text = text.replace(builtinRegex, match => putToken("token-typ", match));
+
+      // 7. Function calls: identifier followed by (
+      text = text.replace(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)(?=\s*\()/g, match => putToken("token-fn", match));
+
+      // 8. Numbers
+      text = text.replace(/\b(\d+(?:\.\d+)?)\b/g, match => putToken("token-num", match));
+
+      // Restore tokens in reverse order
+      for (let i = tokens.length - 1; i >= 0; i--) {
+        text = text.replace(String.fromCharCode(0xE000 + i), tokens[i]);
+      }
+
+      return `
+        <div class="code-line">
+          <span class="line-num">${idx + 1}</span>
+          <span class="line-text">${text}</span>
+        </div>
+      `;
+    }).join("");
   };
 
   // Phase A & B: Artifact normalization
   const rawArtifacts = Array.isArray(c.artifacts) ? [...c.artifacts].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) || a.id - b.id) : [];
+
+  // If Code component and no artifacts, synthesize primary artifacts from content or metadata
+  function isProseDescription(text) {
+    if (!text || typeof text !== "string") return false;
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+
+    if (/^Install the .+ package using its official setup instructions/i.test(trimmed)) return true;
+    if (/wrap project-specific usage behind a small module/i.test(trimmed)) return true;
+    if (/Verify inputs and outputs with tests before sharing/i.test(trimmed)) return true;
+    if (/^(Replace|Adapt|Rename|For an?|Follow the)\b/i.test(trimmed) &&
+        !trimmed.includes("{") && !trimmed.includes(";") && !trimmed.includes("def ") && !trimmed.includes("import ")) {
+      return true;
+    }
+
+    const codeIndicators = [
+      /\b(import\s+[\w*{]|from\s+[\w.]+\s+import|def\s+\w+\(|class\s+\w+|function\s+\w+\(|const\s+\w+\s*=|let\s+\w+\s*=|var\s+\w+\s*=|export\s+(default|const|let|function|class)|module\.exports\s*=|require\(|public\s+class|package\s+\w+|fn\s+\w+\(|struct\s+\w+|#include\b)/,
+      /=>/,
+      /console\.(log|error|warn)\(/,
+      /print\s*\(/,
+      /SELECT\s+.+\s+FROM/i,
+      /CREATE\s+TABLE/i,
+      /INSERT\s+INTO/i
+    ];
+    if (codeIndicators.some(pattern => pattern.test(trimmed))) return false;
+
+    const lines = trimmed.split("\n").map(l => l.trim()).filter(Boolean);
+    if (lines.length > 0 && lines.every(l => /^[A-Z].*[\.!?]$/.test(l) && !/[{};<>=]/.test(l))) {
+      return true;
+    }
+
+    return false;
+  }
+
+  function getTechnologyStarter(component = {}, ext = "js") {
+    const name = component.name || "Component";
+    const tech = component.tech || component.language || "";
+    const nameLower = name.toLowerCase();
+    const techLower = String(tech).toLowerCase();
+
+    const disclaimer = (style) => {
+      if (style === "hash") {
+        return [
+          `# Starter template generated for ${name} (${tech || "Generic"}) by ComponentHub.`,
+          `# This starter is an illustrative template to help you begin integration;`,
+          `# it was not authored or tested by the original component contributor.`,
+          ""
+        ].join("\n");
+      }
+      if (style === "dash") {
+        return [
+          `-- Starter template generated for ${name} (${tech || "Generic"}) by ComponentHub.`,
+          `-- This starter is an illustrative template to help you begin integration;`,
+          `-- it was not authored or tested by the original component contributor.`,
+          ""
+        ].join("\n");
+      }
+      if (style === "python") {
+        return [
+          `"""`,
+          `Starter template generated for ${name} (${tech || "Generic"}) by ComponentHub.`,
+          `This starter is an illustrative template to help you begin integration;`,
+          `it was not authored or tested by the original component contributor.`,
+          `"""`,
+          ""
+        ].join("\n");
+      }
+      return [
+        `/**`,
+        ` * Starter template generated for ${name} (${tech || "Generic"}) by ComponentHub.`,
+        ` * This starter is an illustrative template to help you begin integration;`,
+        ` * it was not authored or tested by the original component contributor.`,
+        ` */`,
+        ""
+      ].join("\n");
+    };
+
+    // 1. Python ecosystem
+    if (ext === "py" || techLower.includes("python")) {
+      const head = disclaimer("python");
+      if (nameLower.includes("flask")) {
+        return head + [
+          `from flask import Flask, jsonify, request`,
+          ``,
+          `app = Flask(__name__)`,
+          ``,
+          `@app.route("/")`,
+          `def home():`,
+          `    return jsonify({`,
+          `        "status": "ok",`,
+          `        "message": "Welcome to Flask application"`,
+          `    })`,
+          ``,
+          `@app.route("/api/health")`,
+          `def health():`,
+          `    return jsonify({"status": "healthy"})`,
+          ``,
+          `if __name__ == "__main__":`,
+          `    app.run(host="0.0.0.0", port=5000, debug=True)`,
+          ``
+        ].join("\n");
+      }
+      if (nameLower.includes("opencv") || nameLower.includes("cv2")) {
+        return head + [
+          `import numpy as np`,
+          ``,
+          `def create_sample_canvas(width=640, height=480):`,
+          `    canvas = np.zeros((height, width, 3), dtype=np.uint8)`,
+          `    return canvas`,
+          ``,
+          `if __name__ == "__main__":`,
+          `    img = create_sample_canvas()`,
+          `    print(f"Canvas created with shape: {img.shape}")`,
+          ``
+        ].join("\n");
+      }
+      if (nameLower.includes("pytest")) {
+        return head + [
+          `import pytest`,
+          ``,
+          `def add(a, b):`,
+          `    return a + b`,
+          ``,
+          `def test_add_success():`,
+          `    assert add(2, 3) == 5`,
+          ``,
+          `def test_add_negative():`,
+          `    assert add(-1, 1) == 0`,
+          ``,
+          `if __name__ == "__main__":`,
+          `    pytest.main([__file__])`,
+          ``
+        ].join("\n");
+      }
+      if (nameLower.includes("pydantic")) {
+        return head + [
+          `from pydantic import BaseModel, Field`,
+          `from typing import Optional`,
+          ``,
+          `class ItemModel(BaseModel):`,
+          `    id: int`,
+          `    name: str = Field(..., min_length=1)`,
+          `    description: Optional[str] = None`,
+          `    price: float = Field(..., gt=0.0)`,
+          ``,
+          `if __name__ == "__main__":`,
+          `    item = ItemModel(id=1, name="Sample Item", price=19.99)`,
+          `    print(item.model_dump_json(indent=2) if hasattr(item, "model_dump_json") else item.json())`,
+          ``
+        ].join("\n");
+      }
+      if (nameLower.includes("marshmallow")) {
+        return head + [
+          `from marshmallow import Schema, fields, validate`,
+          ``,
+          `class ItemSchema(Schema):`,
+          `    id = fields.Int(required=True)`,
+          `    name = fields.Str(required=True, validate=validate.Length(min=1))`,
+          `    price = fields.Float(required=True)`,
+          ``,
+          `if __name__ == "__main__":`,
+          `    schema = ItemSchema()`,
+          `    result = schema.load({"id": 1, "name": "Sample Item", "price": 19.99})`,
+          `    print("Validated:", result)`,
+          ``
+        ].join("\n");
+      }
+      return head + [
+        `def main():`,
+        `    print("Starter script for ${name} initialized")`,
+        ``,
+        `if __name__ == "__main__":`,
+        `    main()`,
+        ``
+      ].join("\n");
+    }
+
+    // 2. React / TypeScript UI
+    if (nameLower.includes("zustand")) {
+      const head = disclaimer("c");
+      return head + [
+        `import { create } from "zustand";`,
+        ``,
+        `interface State {`,
+        `  count: number;`,
+        `  increment: () => void;`,
+        `  reset: () => void;`,
+        `}`,
+        ``,
+        `export const useStore = create<State>((set) => ({`,
+        `  count: 0,`,
+        `  increment: () => set((state) => ({ count: state.count + 1 })),`,
+        `  reset: () => set({ count: 0 }),`,
+        `}));`,
+        ``
+      ].join("\n");
+    }
+
+    // 3. Testing libraries (Vitest, Jest, Supertest, Sinon)
+    if (nameLower.includes("vitest")) {
+      const head = disclaimer("c");
+      return head + [
+        `import { describe, it, expect } from "vitest";`,
+        ``,
+        `describe("Vitest starter suite", () => {`,
+        `  it("executes assertions accurately", () => {`,
+        `    expect(Math.max(1, 5, 10)).toBe(10);`,
+        `  });`,
+        `});`,
+        ``
+      ].join("\n");
+    }
+    if (nameLower.includes("jest")) {
+      const head = disclaimer("c");
+      return head + [
+        `describe("Sample test suite", () => {`,
+        `  test("basic assertion verifies truthiness", () => {`,
+        `    expect(1 + 1).toBe(2);`,
+        `  });`,
+        `});`,
+        ``
+      ].join("\n");
+    }
+    if (nameLower.includes("supertest")) {
+      const head = disclaimer("c");
+      return head + [
+        `const request = require("supertest");`,
+        ``,
+        `async function runSmokeTest(app) {`,
+        `  const res = await request(app).get("/health");`,
+        `  return res.status === 200;`,
+        `}`,
+        ``,
+        `module.exports = { runSmokeTest };`,
+        ``
+      ].join("\n");
+    }
+    if (nameLower.includes("sinon")) {
+      const head = disclaimer("c");
+      return head + [
+        `const sinon = require("sinon");`,
+        ``,
+        `function exampleWorkflow(callback) {`,
+        `  return callback("success");`,
+        `}`,
+        ``,
+        `const spy = sinon.spy();`,
+        `exampleWorkflow(spy);`,
+        `console.log("Called once:", spy.calledOnce);`,
+        ``
+      ].join("\n");
+    }
+
+    // 4. Node / JS utilities (dotenv, node-cache, papaparse, nodemailer, node-postgres)
+    if (nameLower.includes("dotenv")) {
+      const head = disclaimer("c");
+      return head + [
+        `require("dotenv").config();`,
+        ``,
+        `const port = process.env.PORT || 3000;`,
+        `const nodeEnv = process.env.NODE_ENV || "development";`,
+        ``,
+        `console.log(\`Loaded environment for \${nodeEnv} on port \${port}\`);`,
+        ``
+      ].join("\n");
+    }
+    if (nameLower.includes("node-cache")) {
+      const head = disclaimer("c");
+      return head + [
+        `const NodeCache = require("node-cache");`,
+        `const cache = new NodeCache({ stdTTL: 100, checkperiod: 120 });`,
+        ``,
+        `cache.set("status", "ready");`,
+        `console.log("Cached value:", cache.get("status"));`,
+        ``,
+        `module.exports = cache;`,
+        ``
+      ].join("\n");
+    }
+    if (nameLower.includes("papa parse") || nameLower.includes("papaparse")) {
+      const head = disclaimer("c");
+      return head + [
+        `const Papa = require("papaparse");`,
+        ``,
+        `const csvData = "name,role\\nAlice,Admin\\nBob,User";`,
+        `const parsed = Papa.parse(csvData, { header: true });`,
+        ``,
+        `console.log("Parsed rows:", parsed.data);`,
+        `module.exports = parsed;`,
+        ``
+      ].join("\n");
+    }
+    if (nameLower.includes("nodemailer")) {
+      const head = disclaimer("c");
+      return head + [
+        `const nodemailer = require("nodemailer");`,
+        ``,
+        `async function createTestClient() {`,
+        `  const testAccount = await nodemailer.createTestAccount();`,
+        `  return nodemailer.createTransport({`,
+        `    host: "smtp.ethereal.email",`,
+        `    port: 587,`,
+        `    secure: false,`,
+        `    auth: {`,
+        `      user: testAccount.user,`,
+        `      pass: testAccount.pass,`,
+        `    },`,
+        `  });`,
+        `}`,
+        ``,
+        `module.exports = { createTestClient };`,
+        ``
+      ].join("\n");
+    }
+    if (nameLower.includes("postgres") || nameLower.includes("node-postgres") || nameLower === "pg") {
+      const head = disclaimer("c");
+      return head + [
+        `const { Pool } = require("pg");`,
+        ``,
+        `const pool = new Pool({`,
+        `  connectionString: process.env.DATABASE_URL || "postgresql://localhost:5432/app",`,
+        `});`,
+        ``,
+        `async function queryHealth() {`,
+        `  const client = await pool.connect();`,
+        `  try {`,
+        `    const res = await client.query("SELECT NOW()");`,
+        `    return res.rows[0];`,
+        `  } finally {`,
+        `    client.release();`,
+        `  }`,
+        `}`,
+        ``,
+        `module.exports = { pool, queryHealth };`,
+        ``
+      ].join("\n");
+    }
+
+    // 5. Express / Server frameworks
+    if (nameLower.includes("express")) {
+      const head = disclaimer("c");
+      return head + [
+        `const express = require("express");`,
+        `const app = express();`,
+        `const port = process.env.PORT || 3000;`,
+        ``,
+        `app.use(express.json());`,
+        ``,
+        `app.get("/", (req, res) => {`,
+        `  res.json({ status: "ok", message: "Express starter active" });`,
+        `});`,
+        ``,
+        `app.get("/health", (req, res) => {`,
+        `  res.json({ status: "healthy" });`,
+        `});`,
+        ``,
+        `if (require.main === module) {`,
+        `  app.listen(port, () => {`,
+        `    console.log(\`Server listening on port \${port}\`);`,
+        `  });`,
+        `}`,
+        ``,
+        `module.exports = app;`,
+        ``
+      ].join("\n");
+    }
+
+    // 6. Redis
+    if (nameLower.includes("redis")) {
+      const head = disclaimer("c");
+      return head + [
+        `// Example client wrapper for Redis`,
+        `const Redis = require("ioredis");`,
+        `const client = new Redis(process.env.REDIS_URL || "redis://localhost:6379");`,
+        ``,
+        `client.on("connect", () => console.log("Connected to Redis"));`,
+        `module.exports = client;`,
+        ``
+      ].join("\n");
+    }
+
+    // 7. SQL
+    if (ext === "sql" || techLower.includes("sql")) {
+      const head = disclaimer("dash");
+      return head + [
+        `CREATE TABLE IF NOT EXISTS items (`,
+        `    id INTEGER PRIMARY KEY AUTOINCREMENT,`,
+        `    name TEXT NOT NULL,`,
+        `    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+        `);`,
+        ``,
+        `INSERT INTO items (name) VALUES ('Initial Item');`,
+        `SELECT * FROM items;`,
+        ``
+      ].join("\n");
+    }
+
+    // 8. YAML / OpenAPI / GitHub Actions
+    if (ext === "yaml" || ext === "yml" || techLower.includes("yaml")) {
+      const head = disclaimer("hash");
+      if (nameLower.includes("action") || nameLower.includes("ci")) {
+        return head + [
+          `name: CI`,
+          `on: [push, pull_request]`,
+          `jobs:`,
+          `  build:`,
+          `    runs-on: ubuntu-latest`,
+          `    steps:`,
+          `      - uses: actions/checkout@v4`,
+          `      - name: Setup Node.js`,
+          `        uses: actions/setup-node@v4`,
+          `        with:`,
+          `          node-version: 20`,
+          `      - run: npm test`,
+          ``
+        ].join("\n");
+      }
+      return head + [
+        `openapi: 3.0.3`,
+        `info:`,
+        `  title: ${name} API`,
+        `  version: 1.0.0`,
+        `paths:`,
+        `  /health:`,
+        `    get:`,
+        `      summary: Health check`,
+        `      responses:`,
+        `        '200':`,
+        `          description: OK`,
+        ``
+      ].join("\n");
+    }
+
+    // 9. Generic Fallbacks by extension
+    if (ext === "js" || ext === "ts") {
+      const head = disclaimer("c");
+      return head + [
+        `function main() {`,
+        `  console.log("Starter template initialized for ${name}");`,
+        `}`,
+        ``,
+        `if (typeof module !== "undefined" && module.exports) {`,
+        `  module.exports = { main };`,
+        `}`,
+        ``
+      ].join("\n");
+    }
+
+    if (ext === "json") {
+      return JSON.stringify({
+        name: name.toLowerCase().replace(/[^a-z0-9._-]/g, "-"),
+        version: "1.0.0",
+        description: component.description || "Generated starter configuration",
+        componentHubGenerated: true
+      }, null, 2) + "\n";
+    }
+
+    // Catch-all
+    const head = disclaimer("c");
+    return head + [
+      `// Starter template for ${name}`,
+      ``
+    ].join("\n");
+  }
 
   // If Code component and no artifacts, synthesize primary artifacts from content or metadata
   const getSynthesizedCodeArtifacts = () => {
@@ -979,26 +1514,40 @@ P.component = async () => {
       else if (tech.includes("html")) ext = "html";
       else if (tech.includes("css")) ext = "css";
 
+      const formatMap = {
+        py: "python", js: "javascript", ts: "typescript", json: "json",
+        yaml: "yaml", md: "markdown", html: "html", css: "css", sql: "sql",
+        cs: "csharp", java: "java", cpp: "cpp", c: "c", go: "go", rs: "rust"
+      };
+      const codeFormat = formatMap[ext] || "txt";
+
       const list = [];
 
-      // 1. Example / Starter File
-      if (c.exampleContent) {
-        list.push({
-          id: 0,
-          componentId: c.id,
-          name: `Example Usage (${c.name})`,
-          description: "Integration and usage example snippet",
-          variantType: "Example",
-          deliveryMethod: c.deliveryMethod || "Package",
-          artifactFormat: ext,
-          content: c.exampleContent,
-          binaryContent: null,
-          downloadFilename: `example.${ext}`,
-          reuseMethod: c.reuseMethod || "Install package",
-          isPrimary: true,
-          sortOrder: 0
-        });
+      // Check whether exampleContent is prose or genuine code
+      const isProse = isProseDescription(c.exampleContent);
+      let starterCode = "";
+      if (c.exampleContent && !isProse) {
+        starterCode = c.exampleContent;
+      } else {
+        starterCode = getTechnologyStarter(c, ext);
       }
+
+      // 1. Example / Starter File
+      list.push({
+        id: 0,
+        componentId: c.id,
+        name: `Example Usage (${c.name})`,
+        description: isProse ? `Starter template generated for ${c.name}` : "Integration and usage example snippet",
+        variantType: "Example",
+        deliveryMethod: c.deliveryMethod || "Package",
+        artifactFormat: codeFormat,
+        content: starterCode,
+        binaryContent: null,
+        downloadFilename: `example.${ext}`,
+        reuseMethod: c.reuseMethod || "Install package",
+        isPrimary: true,
+        sortOrder: 0
+      });
 
       // 2. README Documentation File
       const readmeDoc = [
@@ -1009,7 +1558,8 @@ P.component = async () => {
         c.installCommand ? `## Installation\n\`\`\`bash\n${c.installCommand}\n\`\`\`\n` : "",
         c.reuseMethod ? `## Reuse Approach\n${c.reuseMethod}\n` : "",
         c.usageNotes ? `## Usage Guidance\n${c.usageNotes}\n` : "",
-        c.exampleContent ? `## Example Adaptation\n\`\`\`${ext}\n${c.exampleContent}\n\`\`\`\n` : "",
+        isProse && c.exampleContent ? `## Integration Guidance\n${c.exampleContent}\n` : "",
+        !isProse && c.exampleContent ? `## Example Adaptation\n\`\`\`${ext}\n${c.exampleContent}\n\`\`\`\n` : "",
         c.url ? `## Official Reference\n[${c.name} Documentation & Repository](${c.url})\n` : ""
       ].filter(Boolean).join("\n");
 
@@ -1025,7 +1575,7 @@ P.component = async () => {
         binaryContent: null,
         downloadFilename: "README.md",
         reuseMethod: c.reuseMethod || "Install package",
-        isPrimary: !c.exampleContent,
+        isPrimary: false,
         sortOrder: 1
       });
 
@@ -1643,11 +2193,39 @@ P.component = async () => {
             variantName: artifact.variantType || "Source",
             isCataloguer: role === "Cataloguer",
             onSave: async ({ content }) => {
-              if (role === "Cataloguer" && artifact.id) {
+              if (role === "Cataloguer") {
                 try {
-                  await C.updateArtifact(id, artifact.id, { ...artifact, content });
+                  if (artifact.id && artifact.id > 0) {
+                    await C.updateArtifact(id, artifact.id, { ...artifact, content });
+                  } else {
+                    const fallbackExt = String(artifact.downloadFilename || "").split(".").pop().toLowerCase() || "txt";
+                    const formatMap = {
+                      py: "python", js: "javascript", ts: "typescript", json: "json",
+                      yaml: "yaml", yml: "yaml", md: "markdown", html: "html", css: "css", sql: "sql",
+                      cs: "csharp", java: "java", cpp: "cpp", c: "c", go: "go", rs: "rust"
+                    };
+                    const targetFormat = formatMap[artifact.artifactFormat] || formatMap[fallbackExt] || artifact.artifactFormat || "txt";
+
+                    const created = await C.addArtifact(id, {
+                      name: artifact.name || `${c.name} Source`,
+                      description: artifact.description || `Source file for ${c.name}`,
+                      variantType: artifact.variantType || "Source",
+                      deliveryMethod: artifact.deliveryMethod || "Editable Source",
+                      artifactFormat: targetFormat,
+                      contentType: "text/plain",
+                      content: content,
+                      downloadFilename: artifact.downloadFilename || `example.${fallbackExt}`,
+                      reuseMethod: artifact.reuseMethod || "Copy and edit",
+                      isPrimary: artifact.isPrimary ? 1 : 0,
+                      sortOrder: artifact.sortOrder || 0
+                    });
+                    if (created && created.id) {
+                      artifact.id = created.id;
+                    }
+                  }
                   artifact.content = content;
-                  componentNotice = "File updated in catalogue.";
+                  componentNotice = "File saved to catalogue.";
+                  await C.getComponent(id);
                   P.component();
                 } catch (err) {
                   showError(err);
@@ -1662,7 +2240,7 @@ P.component = async () => {
       };
     }
 
-    lucide.createIcons();
+    safeCreateIcons();
   };
 
   // Wire Category Tab clicks
@@ -1683,7 +2261,7 @@ P.component = async () => {
         wrapEl.classList.toggle("wrap-lines");
         const isWrapped = wrapEl.classList.contains("wrap-lines");
         btnToggleWrap.innerHTML = isWrapped ? `${ic("align-justify")} No Wrap` : `${ic("align-left")} Wrap Lines`;
-        lucide.createIcons();
+        safeCreateIcons();
       }
     };
   }
@@ -1698,7 +2276,7 @@ P.component = async () => {
         await recordReuse();
         const orig = btnCodeCopy.innerHTML;
         btnCodeCopy.innerHTML = `${ic("check")} Copied!`;
-        setTimeout(() => { btnCodeCopy.innerHTML = orig; lucide.createIcons(); }, 1800);
+        setTimeout(() => { btnCodeCopy.innerHTML = orig; safeCreateIcons(); }, 1800);
       } catch (err) {
         showError(err);
       }
@@ -1884,7 +2462,7 @@ P.component = async () => {
       };
     }
 
-    lucide.createIcons();
+    safeCreateIcons();
   };
 
   // Attach Design Variant Tab Event Handlers
@@ -1907,7 +2485,7 @@ P.component = async () => {
         await recordReuse();
         const orig = activeCopyBtn.innerHTML;
         activeCopyBtn.innerHTML = `${ic("check")} Copied!`;
-        setTimeout(() => { activeCopyBtn.innerHTML = orig; lucide.createIcons(); }, 1800);
+        setTimeout(() => { activeCopyBtn.innerHTML = orig; safeCreateIcons(); }, 1800);
       } catch (err) {
         showError(err);
       }
@@ -2219,7 +2797,7 @@ P.component = async () => {
         await copyText(c.installCommand);
         await recordReuse();
         copyInstallBtn.innerHTML = `${ic("check")} Copied installation command`;
-        setTimeout(() => { copyInstallBtn.innerHTML = `${ic("terminal")} Copy installation command`; lucide.createIcons(); }, 1800);
+        setTimeout(() => { copyInstallBtn.innerHTML = `${ic("terminal")} Copy installation command`; safeCreateIcons(); }, 1800);
       } catch (err) {
         showError(err);
       }
@@ -2234,7 +2812,7 @@ P.component = async () => {
         await copyText(c.installCommand);
         await recordReuse();
         tagCopyInstall.innerHTML = `${ic("check")} Copied!`;
-        setTimeout(() => { tagCopyInstall.innerHTML = `${ic("terminal")} Install package`; lucide.createIcons(); }, 1800);
+        setTimeout(() => { tagCopyInstall.innerHTML = `${ic("terminal")} Install package`; safeCreateIcons(); }, 1800);
       } catch (err) {
         showError(err);
       }
@@ -2342,7 +2920,7 @@ P.component = async () => {
     `;
 
     document.body.appendChild(modal);
-    lucide.createIcons();
+    safeCreateIcons();
 
     const showNotice = msg => {
       const el = $("#use-modal-notice");
@@ -2373,7 +2951,7 @@ P.component = async () => {
           showNotice("Installation command copied and reuse recorded.");
           const cnt = $("#use-modal-used-count");
           if (cnt) cnt.textContent = String(c.usage.used);
-          setTimeout(() => { copyInstall.innerHTML = `${ic("copy")} Copy`; lucide.createIcons(); }, 1800);
+          setTimeout(() => { copyInstall.innerHTML = `${ic("copy")} Copy`; safeCreateIcons(); }, 1800);
         } catch (err) {
           showModalError(err);
         }
@@ -2412,7 +2990,7 @@ P.component = async () => {
           showNotice("Example code copied and reuse recorded.");
           const cnt = $("#use-modal-used-count");
           if (cnt) cnt.textContent = String(c.usage.used);
-          setTimeout(() => { copyCode.innerHTML = `${ic("copy")} Copy Example`; lucide.createIcons(); }, 1800);
+          setTimeout(() => { copyCode.innerHTML = `${ic("copy")} Copy Example`; safeCreateIcons(); }, 1800);
         } catch (err) {
           showModalError(err);
         }
@@ -2459,11 +3037,13 @@ P.component = async () => {
   }
 
   // Initial Diagram render
-  if (artifactGroups.length) {
+  if (c.type === "Design" && typeof designGroups !== "undefined" && designGroups.length) {
     updateActiveDiagram();
   }
 
-  lucide.createIcons();
+  if (typeof lucide !== "undefined" && typeof lucide.createIcons === "function") {
+    try { safeCreateIcons(); } catch {}
+  }
 };
 
 // Render the cataloguer form used to edit an existing component.
@@ -2619,14 +3199,14 @@ P.editComponent = async () => {
 
       componentNotice = "Component updated successfully.";
       P.component();
-      lucide.createIcons();
+      safeCreateIcons();
     } catch (err) {
       error.textContent = err.message;
       error.hidden = false;
     }
   };
 
-  lucide.createIcons();
+  safeCreateIcons();
 };
 
 
@@ -3404,7 +3984,7 @@ P.statistics = () => {
 
           P.statistics();
 
-          lucide.createIcons();
+          safeCreateIcons();
 
         } catch (err) {
 
@@ -3476,7 +4056,7 @@ async function boot() {
 
     P[pg]();
 
-    lucide.createIcons();
+    safeCreateIcons();
 
   } catch (err) {
 
